@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo \"started pid=$!\")",
+      "Bash(sleep 2 && cat /tmp/server.log 2>/dev/null | head -10 && echo \"---\" && netstat -ano | grep \":3000.*LISTENING\" | head -1)",
+      "Read(//tmp/**)",
+      "Bash(node _rio_test.js)",
+      "Bash(rm _rio_test.js)",
+      "PowerShell(git config user.name)",
+      "PowerShell(git config user.email)",
+      "PowerShell(git init -b main)",
+      "PowerShell(git add .)"
+    ]
+  }
+}
