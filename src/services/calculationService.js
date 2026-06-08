@@ -140,7 +140,7 @@ async function expand(itemId, desiredWeightKg, ancestors, db) {
   // BOM lines + ingredient metadata in one round-trip
   const { rows: lineRows } = await db.query(
     `SELECT l.id AS line_id, l.ingredient_item_id,
-            l.quantity_kg, l.waste_pct, l.line_uom,
+            l.quantity_kg, l.waste_pct, l.line_uom, l.step_number,
             l.ingredient_type AS line_ingredient_type,
             ing.id     AS ing_id,
             COALESCE(ing.name_en, ing.name) AS ing_name,
@@ -190,6 +190,7 @@ async function expand(itemId, desiredWeightKg, ancestors, db) {
       ingredient_id:     line.ing_id,
       ingredient_name:   line.ing_name,
       ingredient_type:   line.ing_type,            // 'raw_material' | 'recipe'
+      step_number:       line.step_number,
       reference:         line.ing_reference,
       image_url:         line.ing_image,
       unit:              line.ing_uom,
@@ -210,6 +211,14 @@ async function expand(itemId, desiredWeightKg, ancestors, db) {
   const totalCost = materialCost + laborTotal + overheadTotal + packagingTotal;
   const costPerKg = desiredWeightKg > 0 ? totalCost / desiredWeightKg : null;
 
+  // Preparation steps (name + process text) for this recipe, so the
+  // kitchen view can group the scaled ingredients by step.
+  const { rows: stepRows } = await db.query(
+    `SELECT step_number, step_name, description
+     FROM   bom_steps WHERE bom_id = $1 ORDER BY step_number`,
+    [head.bom_id]
+  );
+
   return {
     recipe_id:         itemId,
     recipe_name:       head.name,
@@ -219,6 +228,7 @@ async function expand(itemId, desiredWeightKg, ancestors, db) {
     desired_weight_kg: desiredWeightKg,
     scale_factor:      scale,
     ingredients,
+    steps:             stepRows,
     material_cost_total:  materialCost,
     labor_cost_total:     laborTotal,
     overhead_cost_total:  overheadTotal,

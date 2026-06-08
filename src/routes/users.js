@@ -23,6 +23,7 @@ const express = require('express');
 const pool    = require('../config/db');
 const { requireAdmin }   = require('../middleware/authMiddleware');
 const { logAudit, getIp } = require('../services/auditService');
+const { hashPassword }    = require('../utils/password');
 
 const router = express.Router();
 
@@ -74,6 +75,63 @@ router.get('/', async (req, res) => {
   res.json(rows);
 });
 
+// POST /api/users — create a LOCAL user with username + password.
+// These accounts authenticate against the local password hash (no Odoo).
+// Body: { username, password, name?, role?, can_view_prices? }
+router.post('/', async (req, res) => {
+  const { username, password, name = null, role = 'customer', can_view_prices } = req.body ?? {};
+
+  if (!username || !username.trim()) {
+    return res.status(400).json({ error: 'username is required' });
+  }
+  if (!password || String(password).length < 6) {
+    return res.status(400).json({ error: 'password must be at least 6 characters' });
+  }
+  if (!['admin', 'customer', 'manager'].includes(role)) {
+    return res.status(400).json({ error: "role must be 'admin', 'manager' or 'customer'" });
+  }
+
+  const uname = username.trim();
+
+  // Reject duplicate usernames up front for a clean message.
+  const { rows: dupe } = await pool.query(
+    `SELECT id FROM users WHERE LOWER(username) = LOWER($1)`, [uname]
+  );
+  if (dupe.length) {
+    return res.status(409).json({ error: 'A user with that username already exists.' });
+  }
+
+  const cvp = can_view_prices === true || can_view_prices === false ? can_view_prices : null;
+
+  let created;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO users (username, name, role, can_view_prices, is_active, password_hash)
+       VALUES ($1, $2, $3, $4, TRUE, $5)
+       RETURNING ${PUBLIC_COLS}`,
+      [uname, name?.trim() || uname, role, cvp, hashPassword(password)]
+    );
+    created = rows[0];
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'A user with that username already exists.' });
+    }
+    throw err;
+  }
+
+  await logAudit({
+    userId:      req.localUser?.id ?? null,
+    actionType:  'user_create',
+    entity:      'user',
+    entityId:    created.id,
+    description: `Created local user "${created.username}" (role=${created.role}).`,
+    valueAfter:  { username: created.username, role: created.role, is_active: created.is_active },
+    ipAddress:   getIp(req),
+  });
+
+  res.status(201).json(created);
+});
+
 // GET /api/users/:id
 router.get('/:id', async (req, res) => {
   const id = parseInt(req.params.id);
@@ -105,8 +163,8 @@ router.patch('/:id', async (req, res) => {
   const { role, can_view_prices, is_active } = req.body ?? {};
 
   // ── Validate inputs explicitly (incl. the three-state field) ─────
-  if (role !== undefined && role !== 'admin' && role !== 'customer') {
-    return res.status(400).json({ error: "role must be 'admin' or 'customer'" });
+  if (role !== undefined && !['admin', 'customer', 'manager'].includes(role)) {
+    return res.status(400).json({ error: "role must be 'admin', 'manager' or 'customer'" });
   }
   if (
     can_view_prices !== undefined &&

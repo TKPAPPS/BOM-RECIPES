@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api';
 import { useLang } from '../../context/LanguageContext';
@@ -44,6 +44,33 @@ export const UserManagementPanel: React.FC = () => {
     },
   });
 
+  // ── Create-user form ───────────────────────────────────────────
+  const [form, setForm] = useState<{ username: string; password: string; name: string; role: 'admin' | 'customer' | 'manager' }>(
+    { username: '', password: '', name: '', role: 'customer' }
+  );
+
+  const { mutate: createUser, isPending: creating } = useMutation({
+    mutationFn: () => api.createUser({
+      username: form.username.trim(),
+      password: form.password,
+      name: form.name.trim() || undefined,
+      role: form.role,
+    }),
+    onSuccess: (u) => {
+      qc.invalidateQueries({ queryKey: ['users-list'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-summary'] });
+      toast(t.userCreated, { type: 'success', message: u.username });
+      setForm({ username: '', password: '', name: '', role: 'customer' });
+    },
+    onError: (err: Error) => toast(t.userCreateFailed, { type: 'error', message: err.message }),
+  });
+
+  const submitCreate = () => {
+    if (!form.username.trim()) { toast(t.userCreateFailed, { type: 'warning', message: t.userColUser }); return; }
+    if (form.password.length < 6) { toast(t.userCreateFailed, { type: 'warning', message: t.userPwHint }); return; }
+    createUser();
+  };
+
   const fmtDate = (iso: string | null) =>
     iso
       ? new Date(iso).toLocaleString('en-ZA', {
@@ -63,6 +90,48 @@ export const UserManagementPanel: React.FC = () => {
     <div className="user-mgmt">
       <h3 className="user-mgmt__title">{t.usersTitle}</h3>
       <p className="user-mgmt__desc">{t.usersDesc}</p>
+
+      {/* ── Create new local user (username + password) ──────────── */}
+      <div className="user-mgmt__create">
+        <h4 className="user-mgmt__create-title">{t.userCreateTitle}</h4>
+        <div className="user-mgmt__create-row">
+          <input
+            className="ingredient-row__input"
+            placeholder={t.userColUser}
+            value={form.username}
+            onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
+            autoComplete="off"
+          />
+          <input
+            className="ingredient-row__input"
+            type="password"
+            placeholder={t.userPwPlaceholder}
+            value={form.password}
+            onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+            autoComplete="new-password"
+          />
+          <input
+            className="ingredient-row__input"
+            placeholder={t.userNamePlaceholder}
+            value={form.name}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            autoComplete="off"
+          />
+          <select
+            className="ingredient-row__input"
+            value={form.role}
+            onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as 'admin' | 'customer' | 'manager' }))}
+          >
+            <option value="customer">customer</option>
+            <option value="admin">admin</option>
+            <option value="manager">manager</option>
+          </select>
+          <button className="btn btn--primary" disabled={creating} onClick={submitCreate}>
+            {creating ? t.userSavePending : t.userCreateBtn}
+          </button>
+        </div>
+        <p className="user-mgmt__create-hint">{t.userPwHint}</p>
+      </div>
 
       {isLoading ? (
         <p className="user-mgmt__loading">{t.loading}</p>
@@ -100,11 +169,12 @@ export const UserManagementPanel: React.FC = () => {
                       onChange={(e) =>
                         saveUser({
                           id: u.id,
-                          patch: { role: e.target.value as 'admin' | 'customer' },
+                          patch: { role: e.target.value as 'admin' | 'customer' | 'manager' },
                         })
                       }
                     >
                       <option value="admin">admin</option>
+                      <option value="manager">manager</option>
                       <option value="customer">customer</option>
                     </select>
                   </td>

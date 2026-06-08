@@ -103,7 +103,10 @@ function requireRole(...allowedRoles) {
   };
 }
 
-const requireAdmin = requireRole('admin');
+// 'manager' is a privileged superset of admin — it passes every admin
+// gate AND additionally may promote test recipes (requireManager).
+const requireAdmin = requireRole('admin', 'manager');
+const requireManager = requireRole('manager');
 
 /**
  * Wrap res.json so every response body is filtered through stripPrices
@@ -131,4 +134,5 @@ module.exports = authMiddleware;
 module.exports.authMiddleware  = authMiddleware;
 module.exports.requireRole     = requireRole;
 module.exports.requireAdmin    = requireAdmin;
+module.exports.requireManager  = requireManager;
 module.exports.pricesMiddleware = pricesMiddleware;

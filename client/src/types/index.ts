@@ -14,9 +14,97 @@ export interface SearchResult {
   image_url: string | null;
 }
 
+/** A preparation step in the Kitchen Recipes builder (draft, client-side). */
+export interface RecipeStepDraft {
+  id: string;
+  name: string;
+  description: string;
+}
+
+/** One ingredient line inside a stored test-recipe draft (JSONB). */
+export interface TestDraftLine {
+  step_number: number | null;
+  item_id: number | null;
+  name: string | null;
+  reference: string | null;
+  cost_per_kg: number | null;
+  unit: string | null;
+  line_uom: string;
+  quantity_kg: number;
+  quantity_input: number;
+  waste_pct: number;
+  is_adhoc: boolean;
+  /** Added by the server on GET: does this resolve to a real item? */
+  resolved_item_id?: number | null;
+  resolved_item?: {
+    id: number;
+    name: string;
+    reference: string | null;
+    cost_per_kg: number | null;
+    uom: string | null;
+    image_url: string | null;
+    item_type: ItemType;
+  } | null;
+  is_red?: boolean;
+}
+
+export interface TestRecipeDraft {
+  yieldKg: number;
+  recipeType: RecipeType;
+  full_name?: string | null;
+  description?: string | null;
+  image_url?: string | null;
+  allergens?: string[];
+  is_spicy?: boolean;
+  serving_suggestion?: string | null;
+  servings_count?: number | null;
+  total_weight?: number | null;
+  pricing_formula_id?: number | null;
+  labor_cost?: number;
+  overhead_cost?: number;
+  packaging_cost?: number;
+  steps: { step_number: number; name: string; description: string }[];
+  lines: TestDraftLine[];
+}
+
+export type TestRecipeStatus = 'draft' | 'pending';
+
+export interface TestRecipeSummary {
+  id: number;
+  name: string;
+  reference_code: string | null;
+  recipe_type: RecipeType;
+  status: TestRecipeStatus;
+  review_note: string | null;
+  updated_at: string;
+  created_by_name: string | null;
+  line_count: number;
+  red_count: number;
+}
+
+export interface TestRecipeDetail {
+  id: number;
+  name: string;
+  reference_code: string | null;
+  recipe_type: RecipeType;
+  status: TestRecipeStatus;
+  review_note: string | null;
+  red_count: number;
+  draft: TestRecipeDraft;
+}
+
 export interface IngredientLine {
   lineId: string;
+  /** Legacy: previously grouped lines into steps. Ingredients are now a
+   *  flat list; kept optional for backward compatibility. */
+  stepId?: string;
   item: SearchResult | null;
+  /** Ad-hoc ingredient (test recipes only): a product not in the
+   *  catalogue yet. When set with item===null the line shows red. */
+  adhocName?: string;
+  adhocReference?: string;
+  /** Server-resolved redness for an ad-hoc line (test recipe load). */
+  isRed?: boolean;
   /** Quantity as entered by the user in line_uom */
   quantity_input: number;
   /** Canonical kg value = quantity_input × toKgFactor(line_uom, item.volume_weight) */
@@ -63,6 +151,7 @@ export interface BomLine {
   name_en: string | null;
   name_he: string | null;
   reference: string | null;
+  step_number: number | null;
   quantity_kg: number;
   line_uom: string;
   waste_pct: number;
@@ -71,6 +160,13 @@ export interface BomLine {
   image_url: string | null;
   unit: string;
   item_type: ItemType;
+}
+
+/** Persisted preparation-step metadata returned by GET /boms/:itemId. */
+export interface BomStep {
+  step_number: number;
+  step_name: string | null;
+  description: string | null;
 }
 
 export interface BomDetail {
@@ -97,6 +193,7 @@ export interface BomDetail {
   pricing_formula_id?: number | null;
   image_url?: string | null;
   lines: BomLine[];
+  steps?: BomStep[] | null;
 }
 
 export interface BomSummary {
@@ -135,6 +232,7 @@ export interface CalcIngredient {
   ingredient_id: number;
   ingredient_name: string;
   ingredient_type: 'raw_material' | 'recipe';
+  step_number: number | null;
   reference: string | null;
   image_url: string | null;
   unit: string;
@@ -191,6 +289,7 @@ export interface CalcResult {
   wholesale_total?: number | null;
   retail_total?: number | null;
   aggregated_raw_materials?: CalcAggregatedRawMaterial[];
+  steps?: BomStep[] | null;
 }
 
 export interface BomSnapshotIngredient {
@@ -298,7 +397,20 @@ export interface SyncStatus {
   cron_schedule: string;
 }
 
-export type WeightSource = 'odoo' | 'name_regex' | 'none';
+/** Where the effective weight came from. */
+export type WeightSource = 'manual' | 'odoo' | 'name_regex' | 'none';
+/** Where the effective cost-per-kg came from. 'raw_cost' = no measure
+ *  found, so the cost itself is used as the per-kg/per-unit price. */
+export type CostPerKgSource = 'manual' | 'odoo' | 'name_regex' | 'raw_cost' | 'none';
+/** Family of the parsed measure: weight (kg/g), volume (litre), count (unit). */
+export type Measure = 'weight' | 'volume' | 'count' | null;
+
+/** Fields an admin can override on the Products tab. Weight is in KG. */
+export interface ProductOverride {
+  manual_raw_cost?: number | null;
+  manual_weight_kg?: number | null;
+  manual_cost_per_kg?: number | null;
+}
 
 export interface ProductRow {
   id: number;
@@ -308,33 +420,54 @@ export interface ProductRow {
   name_he: string | null;
   reference: string | null;
   uom: string | null;
-  /** Weight from Odoo as imported (interpreted as kg). null when Odoo had nothing. */
+  /** Effective weight from Odoo (kg). null when Odoo had nothing. */
   volume_weight: number | null;
-  /** Name-regex fallback weight in grams. null when nothing could be parsed. */
+  /** Raw Odoo weight (kg) before any override — drives placeholders. */
+  odoo_weight_kg: number | null;
+  /** Real name-regex weight in grams (volume/count are NOT stored here). */
   weight_extracted_grams: number | null;
   /** Where the effective weight came from. */
   weight_source: WeightSource;
-  /** Effective weight in grams used for cost-per-kg calc (Odoo > regex). */
+  /** Family of the parsed measure (weight/volume/count) or null. */
+  measure: Measure;
+  /** Effective weight in grams used as the cost divisor. */
   effective_weight_grams: number | null;
-  /** Raw unit price from Odoo (standard_price), before any normalisation. */
+  /** Effective cost price (manual override → Odoo standard_price). */
   raw_cost: number | null;
-  /** What sync wrote into items.cost_per_kg. May be price-stripped. */
-  cost_per_kg_stored: number | null;
-  /** Live recompute: raw_cost / (effective_weight_grams) * 1000.  null when weight missing. */
-  cost_per_kg_computed: number | null;
-  /** Mirrors weight_source for the chosen cost-per-kg value. */
-  cost_per_kg_source: WeightSource;
-  /** True when neither Odoo nor regex resolved a weight. */
+  /** Raw Odoo cost before any override — drives placeholders. */
+  odoo_raw_cost: number | null;
+  /** Effective, live-resolved cost per kg / litre / unit. */
+  cost_per_kg: number | null;
+  /** Where the effective cost-per-kg came from. */
+  cost_per_kg_source: CostPerKgSource;
+  /** True when neither manual, Odoo nor regex resolved a weight/measure. */
   weight_missing: boolean;
+
+  // Manual overrides (null when not set) — pre-fill the edit form.
+  manual_raw_cost: number | null;
+  manual_weight_grams: number | null;
+  manual_cost_per_kg: number | null;
+  cost_overridden: boolean;
+
+  /** True when the product is archived in Odoo (hidden unless opted in). */
+  odoo_archived: boolean;
+
   image_url: string | null;
   category_name: string | null;
   last_synced_at: string | null;
 }
 
+export interface ReferenceCodeCategory {
+  id: number;
+  prefix: string;
+  description: string | null;
+}
+
 export interface DashboardSummary {
   recipes:  { base_count: number; final_count: number; total_recipes: number };
-  products: { active_products: number };
-  users:    { admin_count: number; customer_count: number; inactive_count: number };
+  products: { active_products: number; archived_products: number };
+  test_recipes: { pending_count: number; draft_count: number; total: number };
+  users:    { manager_count: number; admin_count: number; customer_count: number; inactive_count: number };
 }
 
 /* ── Recipe Excel Import / Export ─────────────────────────────────── */

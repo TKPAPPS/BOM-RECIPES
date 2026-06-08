@@ -21,20 +21,31 @@ router.get('/summary', requireAdmin, async (_req, res) => {
      WHERE b.is_active = TRUE`
   );
   const { rows: prodRows } = await pool.query(
-    `SELECT COUNT(*)::int AS active_products
-     FROM items WHERE item_type='raw_material' AND is_active=TRUE`
+    `SELECT
+       COUNT(*) FILTER (WHERE is_active = TRUE AND NOT odoo_archived)::int AS active_products,
+       COUNT(*) FILTER (WHERE odoo_archived)::int                          AS archived_products
+     FROM items WHERE item_type='raw_material'`
+  );
+  const { rows: testRows } = await pool.query(
+    `SELECT
+       COUNT(*) FILTER (WHERE status='pending')::int AS pending_count,
+       COUNT(*) FILTER (WHERE status='draft')::int   AS draft_count,
+       COUNT(*)::int                                  AS total
+     FROM test_recipes`
   );
   const { rows: userRows } = await pool.query(
     `SELECT
+       COUNT(*) FILTER (WHERE role='manager'  AND is_active=TRUE)::int AS manager_count,
        COUNT(*) FILTER (WHERE role='admin'    AND is_active=TRUE)::int AS admin_count,
        COUNT(*) FILTER (WHERE role='customer' AND is_active=TRUE)::int AS customer_count,
        COUNT(*) FILTER (WHERE is_active=FALSE)::int                    AS inactive_count
      FROM users`
   );
   res.json({
-    recipes:  rows[0],
-    products: prodRows[0],
-    users:    userRows[0],
+    recipes:      rows[0],
+    products:     prodRows[0],
+    test_recipes: testRows[0],
+    users:        userRows[0],
   });
 });
 
@@ -49,6 +60,8 @@ router.get('/summary', requireAdmin, async (_req, res) => {
 router.get('/', async (req, res) => {
   const { type } = req.query;
   const typeFilter = type === 'base' || type === 'final' ? type : null;
+  // Default list hides archived recipes; ?archived=true shows only archived.
+  const archivedFilter = req.query.archived === 'true';
 
   const { rows } = await pool.query(
     `SELECT b.id,
@@ -78,17 +91,27 @@ router.get('/', async (req, res) => {
      JOIN   items i ON i.id = b.item_id
      LEFT JOIN bom_lines l ON l.bom_id = b.id
      WHERE  b.is_active = TRUE
+       AND  i.is_active = TRUE
+       AND  b.archived = $2
        AND  ($1::text IS NULL OR b.recipe_type = $1)
      GROUP BY b.id, i.id, i.name_en, i.name, i.cost_per_kg, i.category_id, i.image_url
      ORDER BY b.updated_at DESC`,
-    [typeFilter]
+    [typeFilter, archivedFilter]
   );
 
   // Resolve live pricing per row via the engine.  Parallel to keep
   // latency low; each call is 2 small indexed lookups (~ms) so 100s
   // of recipes still respond well under a second.
   const enriched = await Promise.all(rows.map(async (r) => {
-    const p = await resolvePricingForItem(r.item_id);
+    // Never let a single bad pricing lookup 500 the whole list — fall
+    // back to a neutral pricing shape and still return the row.
+    let p;
+    try {
+      p = await resolvePricingForItem(r.item_id);
+    } catch (err) {
+      console.warn(`[GET /boms] pricing resolve failed for item ${r.item_id}:`, err.message);
+      p = { wholesale_multiplier: null, retail_multiplier: null, formula: { name: null }, selection: 'auto' };
+    }
     const totalCost = r.total_cost != null ? parseFloat(r.total_cost) : null;
     return {
       ...r,
@@ -146,8 +169,9 @@ router.get('/:itemId', async (req, res) => {
               'ingredient',              COALESCE(ing.name_en, ing.name),
               'name_en',                 ing.name_en,
               'name_he',                 ing.name_he,
-              'reference',               ing.reference,
+              'reference',               COALESCE(ing.reference, ing_bom.reference_code),
               'ingredient_type',         l.ingredient_type,
+              'step_number',             l.step_number,
               'quantity_kg',             l.quantity_kg,
               'line_uom',                l.line_uom,
               'waste_pct',               l.waste_pct,
@@ -160,11 +184,20 @@ router.get('/:itemId', async (req, res) => {
               'image_url',               ing.image_url,
               'unit',                    ing.uom,
               'item_type',               ing.item_type
-            ) ORDER BY l.id) AS lines
+            ) ORDER BY l.id) AS lines,
+            (SELECT json_agg(json_build_object(
+                      'step_number', st.step_number,
+                      'step_name',   st.step_name,
+                      'description', st.description
+                    ) ORDER BY st.step_number)
+             FROM bom_steps st WHERE st.bom_id = b.id) AS steps
      FROM   boms b
      JOIN   items i   ON i.id = b.item_id
      JOIN   bom_lines l   ON l.bom_id = b.id
      JOIN   items ing ON ing.id = l.ingredient_item_id
+     -- For sub-recipe ingredients, pull the recipe's own code (lives on
+     -- boms.reference_code, not items.reference) for the REF CODE column.
+     LEFT JOIN boms ing_bom ON ing_bom.item_id = ing.id AND ing_bom.is_active = TRUE
      WHERE  b.item_id = $1 AND b.is_active = TRUE
      GROUP BY b.id, i.name_en, i.name, i.image_url, i.cost_per_kg`,
     [req.params.itemId]
@@ -290,10 +323,95 @@ router.post('/', requireAdmin, async (req, res) => {
   }
 });
 
-// DELETE /boms/:id — deactivate a BOM (admin only)
+// DELETE /boms/:id — PERMANENTLY delete a recipe (admin only).
+// Deletes the recipe's items row; FK CASCADE removes its boms, bom_lines,
+// bom_steps, bom_snapshots and cost_history.  The bom_lines.ingredient_item_id
+// FK is NO ACTION, so this fails cleanly if the recipe is still used as a
+// sub-recipe in another recipe — caught and reported as 409 'in_use'.
 router.delete('/:id', requireAdmin, async (req, res) => {
-  await pool.query(`UPDATE boms SET is_active = FALSE WHERE id = $1`, [req.params.id]);
-  res.json({ message: 'BOM deactivated' });
+  const bomId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(bomId)) return res.status(400).json({ error: 'invalid id' });
+  const { rows } = await pool.query(`SELECT item_id FROM boms WHERE id = $1`, [bomId]);
+  if (!rows.length) return res.status(404).json({ error: 'not found' });
+  const itemId = rows[0].item_id;
+  try {
+    await pool.query(`DELETE FROM items WHERE id = $1 AND item_type = 'recipe'`, [itemId]);
+    res.json({ message: 'Recipe permanently deleted' });
+  } catch (err) {
+    if (err.code === '23503') { // foreign_key_violation — used as a sub-recipe
+      return res.status(409).json({
+        error: 'in_use',
+        message: 'This recipe is used as a sub-recipe in another recipe and cannot be deleted. Remove it from those recipes first, or archive it instead.',
+      });
+    }
+    throw err;
+  }
+});
+
+// ── Bulk actions (keyed by item_id, matching the list's selection) ──
+// Helper: validate and normalise an itemIds[] body into a clean int[].
+function parseItemIds(body) {
+  const raw = Array.isArray(body?.itemIds) ? body.itemIds : [];
+  const ids = [...new Set(raw.map((n) => parseInt(n, 10)).filter(Number.isInteger))];
+  return ids;
+}
+
+// POST /boms/bulk-delete — PERMANENTLY delete many recipes by item_id.
+// Fast path deletes all at once (FK NO ACTION defers to statement end, so
+// internal cross-references within the set resolve as their lines cascade).
+// If any recipe is still referenced by a recipe OUTSIDE the set the bulk
+// statement fails atomically — we then fall back to a retry-until-stable
+// per-item pass so everything deletable is removed and the rest reported.
+router.post('/bulk-delete', requireAdmin, async (req, res) => {
+  const ids = parseItemIds(req.body);
+  if (!ids.length) return res.status(400).json({ error: 'itemIds[] must be a non-empty array' });
+
+  try {
+    const { rowCount } = await pool.query(
+      `DELETE FROM items WHERE id = ANY($1::int[]) AND item_type = 'recipe'`,
+      [ids]
+    );
+    return res.json({ message: 'Recipes deleted', count: rowCount, blocked: [] });
+  } catch (err) {
+    if (err.code !== '23503') throw err; // only fall back on FK violations
+  }
+
+  // Fallback: delete what we can, retrying until no further progress.
+  let remaining = [...ids];
+  let deleted = 0;
+  let progress = true;
+  while (progress && remaining.length) {
+    progress = false;
+    const stillBlocked = [];
+    for (const id of remaining) {
+      try {
+        const { rowCount } = await pool.query(
+          `DELETE FROM items WHERE id = $1 AND item_type = 'recipe'`, [id]
+        );
+        deleted += rowCount;
+        if (rowCount > 0) progress = true;
+      } catch (err) {
+        if (err.code === '23503') stillBlocked.push(id);
+        else throw err;
+      }
+    }
+    remaining = stillBlocked;
+  }
+  res.json({ message: 'Recipes deleted', count: deleted, blocked: remaining });
+});
+
+// POST /boms/bulk-archive — set archived flag for many recipes.
+// Body: { itemIds: [...], archived?: boolean }  (archived defaults to true)
+router.post('/bulk-archive', requireAdmin, async (req, res) => {
+  const ids = parseItemIds(req.body);
+  if (!ids.length) return res.status(400).json({ error: 'itemIds[] must be a non-empty array' });
+  const archived = req.body?.archived === false ? false : true;
+  const { rowCount } = await pool.query(
+    `UPDATE boms SET archived = $2, updated_at = NOW()
+      WHERE item_id = ANY($1::int[]) AND is_active = TRUE`,
+    [ids, archived]
+  );
+  res.json({ message: archived ? 'Recipes archived' : 'Recipes unarchived', count: rowCount });
 });
 
 module.exports = router;

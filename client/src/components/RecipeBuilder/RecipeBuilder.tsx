@@ -8,8 +8,9 @@ import { useLang } from '../../context/LanguageContext';
 import { api } from '../../api';
 import { IngredientRow } from './IngredientRow';
 import { CostDisplay } from './CostDisplay';
+import { buildRecipeDraftFromDetail, buildBuilderFromTestRecipe } from './recipeDraft';
 import { readImageFileSmart } from '../RecipeBook/imageHelpers';
-import type { IngredientLine } from '../../types';
+import type { IngredientLine, TestRecipeDraft } from '../../types';
 import { nanoid } from 'nanoid';
 
 // Generous raw-file ceiling.  Above this the server's express.json
@@ -18,9 +19,10 @@ import { nanoid } from 'nanoid';
 // instead of letting the request 413.
 const MAX_RAW_IMAGE_BYTES = 20 * 1024 * 1024;
 
-export const RecipeBuilder: React.FC = () => {
+export const RecipeBuilder: React.FC<{ mode?: 'real' | 'test' }> = ({ mode = 'real' }) => {
   const { itemId } = useParams<{ itemId: string }>();
   const navigate   = useNavigate();
+  const isTest = mode === 'test';
 
   const {
     recipeName,
@@ -28,6 +30,9 @@ export const RecipeBuilder: React.FC = () => {
     yieldKg,
     recipeType,
     lines,
+    steps,
+    mode: storeMode,
+    testId,
     wholesaleMultiplier,
     retailMultiplier,
     pricingFormulaId,
@@ -50,9 +55,6 @@ export const RecipeBuilder: React.FC = () => {
     setRecipeType,
     setMultipliers,
     setPricingFormulaId,
-    setLaborCost,
-    setOverheadCost,
-    setPackagingCost,
     setFullName,
     setDescription,
     setImageUrl,
@@ -64,7 +66,12 @@ export const RecipeBuilder: React.FC = () => {
     addLine,
     removeLine,
     updateLine,
+    addStep,
+    removeStep,
+    updateStep,
     loadBom,
+    loadTestDraft,
+    startDraft,
     reset,
   } = useRecipeStore();
 
@@ -105,33 +112,24 @@ export const RecipeBuilder: React.FC = () => {
     if (!itemId) return;
     const id = parseInt(itemId, 10);
     if (isNaN(id)) return;
-    if (editingItemId === id) return;
 
-    api.getBom(id).then((detail) => {
-      const loadedLines: IngredientLine[] = detail.lines.map((l) => {
-        const lineUom = l.line_uom ?? 'kg';
-        return {
-          lineId: nanoid(),
-          item: {
-            id:            l.ingredient_id,
-            name:          l.ingredient,
-            name_en:       l.name_en   ?? null,
-            name_he:       l.name_he   ?? null,
-            reference:     l.reference ?? null,
-            type:          l.item_type,
-            cost_per_kg:   l.cost_per_kg,
-            unit:          l.unit ?? 'kg',
-            volume_weight: null,
-            image_url:     l.image_url ?? null,
-          },
-          line_uom:       lineUom,
-          waste_pct:      l.waste_pct ?? 0,
-          quantity_kg:    l.quantity_kg,
-          quantity_input: l.quantity_kg,
-        };
+    if (isTest) {
+      if (storeMode === 'test' && testId === id) return;
+      api.getTestRecipe(id).then((detail) => {
+        loadTestDraft(buildBuilderFromTestRecipe(detail), id);
+      }).catch(() => {
+        toast('Load failed', { type: 'error', message: 'Could not load test recipe.' });
+        navigate('/test-kitchen');
       });
+      return;
+    }
+
+    if (storeMode === 'real' && editingItemId === id) return;
+    api.getBom(id).then((detail) => {
+      const { steps: draftSteps, lines: loadedLines } = buildRecipeDraftFromDetail(detail);
       loadBom(
         {
+          steps:             draftSteps,
           recipeName:        detail.recipe_name,
           referenceCode:     detail.reference_code ?? '',
           yieldKg:           detail.yield_kg,
@@ -156,17 +154,49 @@ export const RecipeBuilder: React.FC = () => {
       toast('Load failed', { type: 'error', message: 'Could not load recipe.' });
       navigate('/recipes');
     });
-  }, [itemId, editingItemId, loadBom, navigate, toast]);
+  }, [itemId, isTest, storeMode, editingItemId, testId, loadBom, loadTestDraft, navigate, toast]);
 
-  // /recipe/new: clear out the form ONLY when arriving from an edit
-  // session (store currently represents an existing recipe).  When the
-  // store is already a draft (editingItemId === null), leave it alone
-  // so the user's in-progress work survives tab switches and reloads.
+  // /recipe/new (or /test-recipe/new): start a fresh draft of the right
+  // mode when arriving from an edit session or after switching tabs/mode.
+  // A same-mode in-progress draft is preserved (survives navigation).
   useEffect(() => {
-    if (!itemId && editingItemId !== null) {
-      reset();
-    }
-  }, [itemId, editingItemId, reset]);
+    if (itemId) return;
+    const switchingMode = storeMode !== mode;
+    const fromEdit = mode === 'test' ? testId !== null : editingItemId !== null;
+    if (switchingMode || fromEdit) startDraft(mode);
+  }, [itemId, mode, storeMode, editingItemId, testId, startDraft]);
+
+  // ── Final product = base recipe + packaging ──────────────────
+  // A final product carries a base recipe as an ingredient.  When one is
+  // present we auto-fill the empty branding fields (name/description/
+  // image/allergens/serving) from that base recipe and pull its prep
+  // steps down (read-only).  Empty-fields-only so manual edits survive.
+  const baseRecipeItemId = recipeType === 'final'
+    ? (lines.find((l) => l.item?.type === 'recipe')?.item?.id ?? null)
+    : null;
+  // Only auto-pull while CREATING a new recipe — editing an existing one
+  // keeps its saved branding/steps (avoids clobbering + dirty-on-open).
+  const isNewDraft = mode === 'test' ? testId === null : editingItemId === null;
+  const pulledBaseRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (recipeType !== 'final' || baseRecipeItemId == null || !isNewDraft) return;
+    if (pulledBaseRef.current === baseRecipeItemId) return;
+    pulledBaseRef.current = baseRecipeItemId;
+    api.getBom(baseRecipeItemId).then((d) => {
+      const st = useRecipeStore.getState();
+      if (!st.fullName)          st.setFullName(d.full_name || d.recipe_name || '');
+      if (!st.description)       st.setDescription(d.description ?? '');
+      if (!st.imageUrl)          st.setImageUrl(d.image_url ?? '');
+      if (st.allergens.length === 0 && Array.isArray(d.allergens) && d.allergens.length)
+        st.setAllergens(d.allergens);
+      if (!st.servingSuggestion && d.serving_suggestion)
+        st.setServingSuggestion(d.serving_suggestion);
+      st.setIsSpicy(!!d.is_spicy);
+      st.setSteps((d.steps ?? []).map((s) => ({
+        id: nanoid(), name: s.step_name ?? '', description: s.description ?? '',
+      })));
+    }).catch(() => { pulledBaseRef.current = null; });
+  }, [recipeType, baseRecipeItemId, isNewDraft]);
 
   // Fetch all available formulas for the Pricing Strategy dropdown
   const { data: formulas = [] } = useQuery({
@@ -174,6 +204,25 @@ export const RecipeBuilder: React.FC = () => {
     queryFn: api.getFormulas,
     staleTime: 30_000,
   });
+
+  // Manager-defined reference-code categories (prefixes).  Picking one
+  // auto-fills the next free number in that prefix into the code field.
+  const { data: refCategories = [] } = useQuery({
+    queryKey: ['reference-categories'],
+    queryFn: () => api.getReferenceCategories(),
+    staleTime: 30_000,
+  });
+
+  const handlePickCategory = useCallback(async (prefix: string) => {
+    if (!prefix) return;
+    try {
+      const { code } = await api.getNextReferenceCode(prefix);
+      setReferenceCode(code);
+      setFieldErrors((prev) => ({ ...prev, referenceCode: false }));
+    } catch (err) {
+      toast(t.refCodeNextFailed, { type: 'error', message: (err as Error).message });
+    }
+  }, [setReferenceCode, toast, t]);
 
   // Live resolver lookup for the loaded recipe — tells us which formula
   // the server would actually apply RIGHT NOW (manual or auto).  Used
@@ -271,10 +320,56 @@ export const RecipeBuilder: React.FC = () => {
     }
   }, [blocker]);
 
+  // Build the JSONB draft for a TEST recipe from the current store state.
+  const buildTestDraft = (): TestRecipeDraft => {
+    return {
+      yieldKg,
+      recipeType,
+      full_name:          fullName || null,
+      description:        description || null,
+      image_url:          imageUrl || null,
+      allergens,
+      is_spicy:           isSpicy,
+      serving_suggestion: servingSuggestion || null,
+      servings_count:     servingsCount,
+      total_weight:       totalWeight,
+      pricing_formula_id: pricingFormulaId,
+      labor_cost:         laborCost,
+      overhead_cost:      overheadCost,
+      packaging_cost:     packagingCost,
+      steps: steps.map((st, i) => ({ step_number: i + 1, name: st.name, description: st.description })),
+      lines: lines
+        .filter((l) => l.item || l.adhocName)
+        .map((l) => ({
+          step_number:    null,
+          item_id:        l.item ? l.item.id : null,
+          name:           l.item ? l.item.name : (l.adhocName ?? ''),
+          reference:      l.item ? l.item.reference : (l.adhocReference || null),
+          cost_per_kg:    l.item ? l.item.cost_per_kg : null,
+          unit:           l.item ? l.item.unit : null,
+          line_uom:       l.line_uom,
+          quantity_kg:    l.quantity_kg,
+          quantity_input: l.quantity_input,
+          waste_pct:      l.waste_pct,
+          is_adhoc:       !l.item,
+        })),
+    };
+  };
+
   const { mutate: saveRecipe, isPending } = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      if (isTest) {
+        await api.saveTestRecipe({
+          id:             testId,
+          name:           recipeName,
+          reference_code: referenceCode || null,
+          recipe_type:    recipeType,
+          draft:          buildTestDraft(),
+        });
+        return;
+      }
       const validLines = lines.filter((l) => l.item && l.quantity_kg > 0);
-      return api.saveRecipe({
+      await api.saveRecipe({
         // When editing, pin the target item so the server updates
         // THIS recipe in place even if the name changed (the
         // legacy name-based find-or-create created a duplicate
@@ -301,26 +396,51 @@ export const RecipeBuilder: React.FC = () => {
           quantity_kg:        l.quantity_kg,
           line_uom:           l.line_uom,
           waste_pct:          l.waste_pct,
+          step_number:        null,
+        })),
+        steps: steps.map((st, i) => ({
+          step_number: i + 1,
+          step_name:   st.name || null,
+          description: st.description || null,
         })),
       });
+      return;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['boms'] });
-      qc.invalidateQueries({ queryKey: ['items-search'] });
       const name = recipeName;
       const savedType = recipeType;
       // Disable both navigation guards BEFORE the post-save redirect so
       // the leave-prompt never fires on a deliberate save.  reset()
-      // clears the dirty flag + the persisted /recipe/new draft (the
-      // zustand persist middleware writes the empty initial state).
+      // clears the dirty flag + the persisted draft.
       bypassGuardRef.current = true;
       reset();
+      if (isTest) {
+        qc.invalidateQueries({ queryKey: ['test-recipes'] });
+        toast('Test recipe saved', { type: 'success', message: `"${name}" has been saved.` });
+        navigate('/test-kitchen');
+        return;
+      }
+      qc.invalidateQueries({ queryKey: ['boms'] });
+      qc.invalidateQueries({ queryKey: ['items-search'] });
       toast('Recipe saved', { type: 'success', message: `"${name}" has been saved successfully.` });
-      navigate(savedType === 'final' ? '/recipes/final' : '/recipes/base');
+      navigate(`/kitchen?tab=${savedType === 'final' ? 'final' : 'base'}`);
     },
     onError: (err: Error) => {
       toast('Save failed', { type: 'error', message: err.message });
     },
+  });
+
+  // Test mode: submit a saved draft for the main manager's approval.
+  const { mutate: submitForApproval, isPending: isSubmitting } = useMutation({
+    mutationFn: () => api.submitTestRecipe(testId!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['test-recipes'] });
+      bypassGuardRef.current = true;
+      reset();
+      toast(t.submitForApprovalDone, { type: 'success' });
+      navigate('/test-kitchen');
+    },
+    onError: (err: Error) => toast(t.submitForApprovalFailed, { type: 'error', message: err.message }),
   });
 
   const handleUpdateLine = useCallback(
@@ -336,13 +456,6 @@ export const RecipeBuilder: React.FC = () => {
   const handleYieldChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseFloat(e.target.value);
     if (!isNaN(val) && val > 0) setYield(val);
-  };
-
-  const handleProductionCostChange = (
-    setter: (v: number) => void
-  ) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseFloat(e.target.value);
-    setter(isNaN(val) || val < 0 ? 0 : val);
   };
 
   // Footer totals — effective quantities (post-waste)
@@ -370,21 +483,25 @@ export const RecipeBuilder: React.FC = () => {
   const [invalidRowIds, setInvalidRowIds] = useState<Set<string>>(new Set());
 
   const validateForm = (): boolean => {
+    // Test recipes are work-in-progress: reference code is optional, and an
+    // ingredient counts as "filled" even when it's an ad-hoc (not-yet-real)
+    // product.  Real recipes require a real catalogue item per line.
+    const isFilled = (l: IngredientLine) => isTest ? (!!l.item || !!l.adhocName) : !!l.item;
+
     const errors = {
       recipeName:       !recipeName.trim(),
-      referenceCode:    !referenceCode.trim(),
+      referenceCode:    isTest ? false : !referenceCode.trim(),
       yieldKg:          isNaN(yieldKg) || yieldKg <= 0,
       emptyIngredients: false,
     };
 
     const badIds = new Set<string>();
-    const completeLines = lines.filter((l) => l.item && l.quantity_input > 0);
+    const completeLines = lines.filter((l) => isFilled(l) && l.quantity_input > 0);
 
     lines.forEach((l) => {
-      const hasItem = l.item !== null;
       const hasQty  = l.quantity_input > 0;
       // A row is invalid only when partially filled (one side set, other missing)
-      if (hasItem !== hasQty) badIds.add(l.lineId);
+      if (isFilled(l) !== hasQty) badIds.add(l.lineId);
     });
 
     errors.emptyIngredients = completeLines.length === 0;
@@ -414,7 +531,8 @@ export const RecipeBuilder: React.FC = () => {
   return (
     <div className="recipe-builder">
       <div className="recipe-builder__title-row">
-        <h2 className="recipe-builder__title">{t.recipeBuilder}</h2>
+        <h2 className="recipe-builder__title">{isTest ? t.testRecipes : t.recipeBuilder}</h2>
+        {isTest && <span className="recipe-builder__test-badge">{t.testBadge}</span>}
         {isDirty && <span className="recipe-builder__dirty-badge">{t.unsavedChanges}</span>}
       </div>
 
@@ -454,13 +572,30 @@ export const RecipeBuilder: React.FC = () => {
 
         <label className={`recipe-builder__field${fieldErrors.referenceCode ? ' recipe-builder__field--error' : ''}`}>
           <span>{t.referenceCode}</span>
-          <input
-            type="text"
-            value={referenceCode}
-            onChange={(e) => { setReferenceCode(e.target.value); setFieldErrors((prev) => ({ ...prev, referenceCode: false })); }}
-            placeholder="e.g. BKY-001"
-            aria-invalid={fieldErrors.referenceCode}
-          />
+          <div className="recipe-builder__refcode-row">
+            {refCategories.length > 0 && (
+              <select
+                className="recipe-builder__refcode-select"
+                value=""
+                onChange={(e) => { handlePickCategory(e.target.value); e.target.value = ''; }}
+              >
+                <option value="">{t.refCodeCategorySelect}</option>
+                {refCategories.map((c) => (
+                  <option key={c.id} value={c.prefix}>
+                    {c.prefix}{c.description ? ` — ${c.description}` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+            <input
+              className="recipe-builder__refcode-input"
+              type="text"
+              value={referenceCode}
+              onChange={(e) => { setReferenceCode(e.target.value); setFieldErrors((prev) => ({ ...prev, referenceCode: false })); }}
+              placeholder="e.g. BKY-0001"
+              aria-invalid={fieldErrors.referenceCode}
+            />
+          </div>
         </label>
 
         <label className={`recipe-builder__field${fieldErrors.yieldKg ? ' recipe-builder__field--error' : ''}`}>
@@ -515,7 +650,8 @@ export const RecipeBuilder: React.FC = () => {
       </div>
 
       {/* ── Recipe-book card fields (admin-curated branding) ───── */}
-      <details className="rb-branding" open>
+      {/* Collapsed by default — kitchen authors focus on the steps below. */}
+      <details className="rb-branding">
         <summary className="rb-branding__summary">
           <span className="rb-branding__summary-text">{t.rbBrandingSection}</span>
         </summary>
@@ -674,100 +810,131 @@ export const RecipeBuilder: React.FC = () => {
         showPricing={recipeType === 'final'}
       />
 
-      {/* ── Ingredient table ─────────────────────────────────── */}
-      <div className="recipe-builder__table-wrap">
-        {/* ── P3-3: Sticky Live Cost Preview strip ─────────── */}
-        {costTier && (
-          <div className="live-cost-bar">
-            <span className="live-cost-bar__label">{t.livePreview}</span>
-            <span className="live-cost-bar__item">
-              <span className="live-cost-bar__name">{t.totalRecipeCost}</span>
-              <strong className="live-cost-bar__value">R {fmt(costTier.total_cost)}</strong>
-            </span>
-            <span className="live-cost-bar__sep" />
-            <span className="live-cost-bar__item">
-              <span className="live-cost-bar__name">{t.costPerKg}</span>
-              <strong className="live-cost-bar__value">R {fmt(costTier.cost_per_kg)}</strong>
-            </span>
-            <span className="live-cost-bar__sep" />
-            <span className="live-cost-bar__item">
-              <span className="live-cost-bar__name">{t.yieldLabel}</span>
-              <strong className="live-cost-bar__value">{yieldKg} kg</strong>
-            </span>
-          </div>
-        )}
+      {/* ── P3-3: Live Cost Preview strip ─────────────────────── */}
+      {costTier && (
+        <div className="live-cost-bar">
+          <span className="live-cost-bar__label">{t.livePreview}</span>
+          <span className="live-cost-bar__item">
+            <span className="live-cost-bar__name">{t.totalRecipeCost}</span>
+            <strong className="live-cost-bar__value">R {fmt(costTier.total_cost)}</strong>
+          </span>
+          <span className="live-cost-bar__sep" />
+          <span className="live-cost-bar__item">
+            <span className="live-cost-bar__name">{t.costPerKg}</span>
+            <strong className="live-cost-bar__value">R {fmt(costTier.cost_per_kg)}</strong>
+          </span>
+          <span className="live-cost-bar__sep" />
+          <span className="live-cost-bar__item">
+            <span className="live-cost-bar__name">{t.yieldLabel}</span>
+            <strong className="live-cost-bar__value">{yieldKg} kg</strong>
+          </span>
+        </div>
+      )}
 
-        <table className="ingredient-table">
-          <thead>
-            <tr>
-              <th className="ingredient-table__th ingredient-table__th--thumb" />
-              <th className="ingredient-table__th">{t.ingredient}</th>
-              <th className="ingredient-table__th">{t.referenceCode}</th>
-              <th className="ingredient-table__th ingredient-table__th--num">
-                {t.qty} / UOM
-              </th>
-              <th className="ingredient-table__th ingredient-table__th--num">{t.costPerKg}</th>
-              <th className="ingredient-table__th ingredient-table__th--num">{t.lineCost}</th>
-              {/* P3-2: % of Cost column */}
-              <th className="ingredient-table__th ingredient-table__th--num ingredient-table__th--pct">
-                {t.ofCostPct}
-              </th>
-              <th className="ingredient-table__th ingredient-table__th--actions" />
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((line) => {
-              // P3-2: calculate this line's cost and percentage
-              const wasteFactor   = 1 - (line.waste_pct || 0) / 100;
-              const effectiveQty  = line.quantity_kg / (wasteFactor > 0 ? wasteFactor : 1);
-              const lineCost      = line.item ? line.item.cost_per_kg * effectiveQty : 0;
-              const pct           = totalRecipeCost > 0 ? (lineCost / totalRecipeCost) * 100 : 0;
-
-              return (
-                <IngredientRow
-                  key={line.lineId}
-                  line={line}
-                  onUpdate={(patch) => {
-                    handleUpdateLine(line.lineId, patch);
-                    if (invalidRowIds.has(line.lineId)) {
-                      setInvalidRowIds((prev) => { const s = new Set(prev); s.delete(line.lineId); return s; });
-                    }
-                  }}
-                  onRemove={() => handleRemoveLine(line.lineId)}
-                  costPct={pct}
-                  hasError={invalidRowIds.has(line.lineId)}
-                />
-              );
-            })}
-          </tbody>
-          <tfoot className="ingredient-table__footer">
-            <tr>
-              <td colSpan={4} className="ingredient-table__footer-label">
-                {t.totals}
-              </td>
-              <td className="ingredient-table__footer-num">
-                {validLines.length > 0 ? '—' : null}
-              </td>
-              <td className="ingredient-table__footer-num">
-                {validLines.length > 0 ? fmt(totalMaterialCost) : null}
-              </td>
-              <td className="ingredient-table__footer-num ingredient-table__footer-pct">
-                {validLines.length > 0 && totalRecipeCost > 0
-                  ? `${fmt((totalMaterialCost / totalRecipeCost) * 100)}%`
-                  : null}
-              </td>
-              <td />
-            </tr>
-          </tfoot>
-        </table>
+      {/* ── Ingredients (flat list — all ingredients with price + qty) ── */}
+      <div className="rb-ingredients">
+        <h3 className="rb-steps__title">{t.rbIngredientsHeader}</h3>
+        <div className="recipe-builder__table-wrap">
+          <table className="ingredient-table">
+            <thead>
+              <tr>
+                <th className="ingredient-table__th ingredient-table__th--thumb" />
+                <th className="ingredient-table__th">{t.ingredient}</th>
+                <th className="ingredient-table__th">{t.referenceCode}</th>
+                <th className="ingredient-table__th ingredient-table__th--num">{t.qty} / UOM</th>
+                <th className="ingredient-table__th ingredient-table__th--num">{t.costPerKg}</th>
+                <th className="ingredient-table__th ingredient-table__th--num">{t.lineCost}</th>
+                <th className="ingredient-table__th ingredient-table__th--num ingredient-table__th--pct">{t.ofCostPct}</th>
+                <th className="ingredient-table__th ingredient-table__th--actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((line) => {
+                const wasteFactor  = 1 - (line.waste_pct || 0) / 100;
+                const effectiveQty = line.quantity_kg / (wasteFactor > 0 ? wasteFactor : 1);
+                const lineCost     = line.item ? line.item.cost_per_kg * effectiveQty : 0;
+                const pct          = totalRecipeCost > 0 ? (lineCost / totalRecipeCost) * 100 : 0;
+                return (
+                  <IngredientRow
+                    key={line.lineId}
+                    line={line}
+                    onUpdate={(patch) => {
+                      handleUpdateLine(line.lineId, patch);
+                      if (invalidRowIds.has(line.lineId)) {
+                        setInvalidRowIds((prev) => { const s = new Set(prev); s.delete(line.lineId); return s; });
+                      }
+                    }}
+                    onRemove={() => handleRemoveLine(line.lineId)}
+                    costPct={pct}
+                    hasError={invalidRowIds.has(line.lineId)}
+                    allowAdhoc={isTest}
+                  />
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <button
+          className={`recipe-builder__add-line${fieldErrors.emptyIngredients ? ' recipe-builder__add-line--error' : ''}`}
+          onClick={() => { addLine(); setFieldErrors((prev) => ({ ...prev, emptyIngredients: false })); }}
+        >
+          {t.addIngredient}
+        </button>
       </div>
 
-      <button
-        className={`recipe-builder__add-line${fieldErrors.emptyIngredients ? ' recipe-builder__add-line--error' : ''}`}
-        onClick={() => { addLine(); setFieldErrors((prev) => ({ ...prev, emptyIngredients: false })); }}
-      >
-        {t.addIngredient}
-      </button>
+      {/* ── Preparation steps ─────────────────────────────────── */}
+      {/* Base recipes: editable optional steps. Final products: NO step
+          editor — steps are pulled from the base recipe (read-only). */}
+      {recipeType === 'base' ? (
+        <div className="rb-steps">
+          <h3 className="rb-steps__title">
+            {t.prepStepsSection} <small className="rb-steps__optional">({t.optional})</small>
+          </h3>
+
+          {steps.map((step, stepIdx) => (
+            <div className="rb-step" key={step.id}>
+              <div className="rb-step__head">
+                <span className="rb-step__number">{t.stepLabel} {stepIdx + 1}</span>
+                <button
+                  type="button"
+                  className="rb-step__remove"
+                  onClick={() => removeStep(step.id)}
+                  title={t.removeStep}
+                  aria-label={t.removeStep}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <label className="rb-step__process">
+                <span className="rb-step__process-label">{t.processExplanation}</span>
+                <textarea
+                  rows={3}
+                  value={step.description}
+                  onChange={(e) => updateStep(step.id, { description: e.target.value })}
+                  placeholder=""
+                />
+              </label>
+            </div>
+          ))}
+
+          <button className="rb-steps__add btn btn--ghost" onClick={addStep}>
+            + {t.addStep}
+          </button>
+        </div>
+      ) : steps.length > 0 ? (
+        <div className="rb-steps">
+          <h3 className="rb-steps__title">{t.prepStepsFromBase}</h3>
+          {steps.map((step, stepIdx) => (
+            <div className="rb-step rb-step--readonly" key={step.id}>
+              <div className="rb-step__head">
+                <span className="rb-step__number">{t.stepLabel} {stepIdx + 1}</span>
+              </div>
+              {step.description && <p className="rb-detail__step-process">{step.description}</p>}
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="recipe-builder__actions">
         <button
@@ -790,6 +957,26 @@ export const RecipeBuilder: React.FC = () => {
             : t.saveRecipe}
         </button>
       </div>
+
+      {/* Test mode: send a saved draft to the manager's approval queue. */}
+      {isTest && testId != null && (
+        <div className="recipe-builder__submit-row">
+          <button
+            type="button"
+            className="btn btn--primary recipe-builder__submit-btn"
+            disabled={isSubmitting || isDirty}
+            title={isDirty ? t.submitSaveFirst : undefined}
+            onClick={() => {
+              if (window.confirm(t.submitForApprovalConfirm)) submitForApproval();
+            }}
+          >
+            {isSubmitting
+              ? <><span className="btn-spinner" aria-hidden="true" /> {t.saving}</>
+              : t.submitForApproval}
+          </button>
+          {isDirty && <p className="recipe-builder__submit-hint">{t.submitSaveFirst}</p>}
+        </div>
+      )}
     </div>
   );
 };

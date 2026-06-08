@@ -28,7 +28,13 @@ export const OdooSyncPanel: React.FC = () => {
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['sync-status'] });
     qc.invalidateQueries({ queryKey: ['dashboard-summary'] });
+    // A sync/recalc changes ingredient costs → invalidate every view that
+    // shows recipe costs, not just the list, so detail pages refresh too.
     qc.invalidateQueries({ queryKey: ['boms'] });
+    qc.invalidateQueries({ queryKey: ['bom'] });
+    qc.invalidateQueries({ queryKey: ['bom-detail'] });
+    qc.invalidateQueries({ queryKey: ['bom-snapshots'] });
+    qc.invalidateQueries({ queryKey: ['products'] });
   };
 
   const { mutate: runSync, isPending: syncing } = useMutation({

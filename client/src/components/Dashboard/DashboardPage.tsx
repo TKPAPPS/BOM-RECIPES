@@ -18,19 +18,21 @@ import { useAuth } from '../../context/AuthContext';
 export const DashboardPage: React.FC = () => {
   const { t } = useLang();
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  // The dashboard is manager-gated at the route level; managers (and the
+  // dev-admin, also a manager) are the audience here.
+  const canView = user?.role === 'manager' || user?.role === 'admin';
 
   const { data: summary } = useQuery({
     queryKey: ['dashboard-summary'],
     queryFn:  api.getDashboardSummary,
-    enabled:  isAdmin,
+    enabled:  canView,
     staleTime: 60_000,
   });
 
   const { data: sync } = useQuery({
     queryKey: ['sync-status'],
     queryFn:  api.getSyncStatus,
-    enabled:  isAdmin,
+    enabled:  canView,
     staleTime: 30_000,
   });
 
@@ -47,38 +49,60 @@ export const DashboardPage: React.FC = () => {
         </p>
       </header>
 
-      {!isAdmin ? (
+      {!canView ? (
         <p className="dashboard__not-admin">
           {t.recipeBookSubtitle}{' '}
           <Link to="/book">{t.recipeBook} →</Link>
         </p>
       ) : (
         <>
-          {/* ── Recipe / product / user cards ─────────────── */}
+          {/* ── Summary cards ─────────────────────────────── */}
           <section className="dashboard__cards">
             <DashCard
+              label={t.dashSummaryPending}
+              value={summary?.test_recipes?.pending_count ?? '—'}
+              accent={(summary?.test_recipes?.pending_count ?? 0) > 0 ? 'bad' : 'ok'}
+              to="/pending-recipes"
+            />
+            <DashCard
+              label={t.dashSummaryTest}
+              value={summary?.test_recipes?.draft_count ?? '—'}
+              accent="gold"
+              to="/test-kitchen"
+            />
+            <DashCard
               label={t.dashSummaryBase}
-              value={summary?.recipes.base_count ?? '—'}
+              value={summary?.recipes?.base_count ?? '—'}
               accent="burgundy"
-              to="/recipes/base"
+              to="/kitchen?tab=base"
             />
             <DashCard
               label={t.dashSummaryFinal}
-              value={summary?.recipes.final_count ?? '—'}
-              accent="gold"
-              to="/recipes/final"
+              value={summary?.recipes?.final_count ?? '—'}
+              accent="burgundy"
+              to="/kitchen?tab=final"
             />
             <DashCard
               label={t.dashSummaryProducts}
-              value={summary?.products.active_products ?? '—'}
+              value={summary?.products?.active_products ?? '—'}
               accent="ink"
+              to="/products"
+              subValue={
+                (summary?.products?.archived_products ?? 0) > 0
+                  ? `${summary!.products.archived_products} ${t.dashArchived}`
+                  : undefined
+              }
             />
             <DashCard
-              label={t.dashSummaryAdmins}
-              value={summary?.users.admin_count ?? '—'}
-              accent="burgundy"
+              label={t.dashSummaryUsers}
+              value={
+                summary
+                  ? (summary.users?.manager_count ?? 0) + (summary.users?.admin_count ?? 0)
+                  : '—'
+              }
+              accent="ink"
               to="/settings"
-              subValue={`${summary?.users.customer_count ?? 0} ${t.dashSummaryCustomers.toLowerCase()}`}
+              subValue={`${summary?.users?.customer_count ?? 0} ${t.dashSummaryCustomers.toLowerCase()}`}
             />
             <DashCard
               label={t.dashLastSync}
@@ -104,13 +128,14 @@ export const DashboardPage: React.FC = () => {
           <section className="dashboard__actions">
             <h3 className="dashboard__section-title">{t.dashQuickActions}</h3>
             <div className="dashboard__action-grid">
-              <Link to="/recipe/new"     className="dashboard__action">+ {t.recipeBuilder}</Link>
-              <Link to="/recipes/base"   className="dashboard__action">{t.baseRecipes}</Link>
-              <Link to="/recipes/final"  className="dashboard__action">{t.finalProducts}</Link>
-              <Link to="/where-used"     className="dashboard__action">{t.whereUsed}</Link>
-              <Link to="/settings"       className="dashboard__action">{t.settings}</Link>
-              <Link to="/logs"           className="dashboard__action">{t.logs}</Link>
-              <Link to="/book"           className="dashboard__action">{t.recipeBook}</Link>
+              <Link to="/pending-recipes" className="dashboard__action">{t.pendingApproval}</Link>
+              <Link to="/test-kitchen"    className="dashboard__action">{t.testRecipes}</Link>
+              <Link to="/kitchen"         className="dashboard__action">{t.kitchenRecipes}</Link>
+              <Link to="/products"        className="dashboard__action">{t.products}</Link>
+              <Link to="/where-used"      className="dashboard__action">{t.whereUsed}</Link>
+              <Link to="/settings"        className="dashboard__action">{t.settings}</Link>
+              <Link to="/logs"            className="dashboard__action">{t.logs}</Link>
+              <Link to="/book"            className="dashboard__action">{t.recipeBook}</Link>
             </div>
           </section>
         </>

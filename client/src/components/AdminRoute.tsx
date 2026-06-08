@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext';
 export const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role !== 'admin') return <Navigate to="/book" replace />;
+  // 'manager' is a privileged superset of admin → passes admin gates too.
+  if (user.role !== 'admin' && user.role !== 'manager') return <Navigate to="/book" replace />;
   return <>{children}</>;
 };

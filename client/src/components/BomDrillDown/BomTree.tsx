@@ -1,10 +1,11 @@
 import React from 'react';
 import { useModalStore } from '../../stores/useModalStore';
+import { CURRENCY_SYMBOL } from '../RecipeBook/imageHelpers';
 import type { BomDetail } from '../../types';
 
 const fmt = (n: number | null | undefined) =>
   n != null && Number.isFinite(n)
-    ? new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR' }).format(n)
+    ? `${CURRENCY_SYMBOL}${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)}`
     : '—';
 
 export const BomTree: React.FC<{ bom: BomDetail }> = React.memo(({ bom }) => {

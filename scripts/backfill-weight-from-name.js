@@ -61,6 +61,11 @@ async function run() {
       if (r) { extracted = r; break; }
     }
     const extractedGrams = extracted ? extracted.grams : null;
+    // Volume ("1 l") and count ("6 unit") matches reuse `grams` only as a
+    // cost divisor proxy — they are NOT real weights, so they must not be
+    // written to weight_extracted_grams.
+    const isWeightMeasure = extracted ? extracted.measure === 'weight' : false;
+    const storedGrams = isWeightMeasure ? extractedGrams : null;
 
     let weightSource;
     let newCostPerKg = null;
@@ -98,7 +103,7 @@ async function run() {
                 cost_per_kg            = $3,
                 updated_at             = NOW()
           WHERE id = $4`,
-        [extractedGrams, weightSource, newCostPerKg, item.id]
+        [storedGrams, weightSource, newCostPerKg, item.id]
       );
       countCostUpdated++;
     } else {
@@ -108,7 +113,7 @@ async function run() {
                 weight_source          = $2,
                 updated_at             = NOW()
           WHERE id = $3`,
-        [extractedGrams, weightSource, item.id]
+        [storedGrams, weightSource, item.id]
       );
     }
   }

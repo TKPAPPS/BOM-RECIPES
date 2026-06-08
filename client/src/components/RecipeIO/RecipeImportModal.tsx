@@ -38,6 +38,8 @@ export const RecipeImportModal: React.FC<Props> = ({ open, onClose, defaultType 
   const [dragging,    setDragging]    = useState(false);
   const [onDuplicate, setOnDuplicate] = useState<'update' | 'skip'>('update');
   const [report,      setReport]      = useState<RecipeImportReport | null>(null);
+  const [conflicts,   setConflicts]   = useState<string[] | null>(null);
+  const [errorMsg,    setErrorMsg]    = useState<string | null>(null);
 
   // Reset modal state every time it opens so a previous result does
   // not bleed into a fresh import.
@@ -47,6 +49,8 @@ export const RecipeImportModal: React.FC<Props> = ({ open, onClose, defaultType 
       setDragging(false);
       setOnDuplicate('update');
       setReport(null);
+      setConflicts(null);
+      setErrorMsg(null);
     }
   }, [open]);
 
@@ -65,6 +69,8 @@ export const RecipeImportModal: React.FC<Props> = ({ open, onClose, defaultType 
     },
     onSuccess: (data) => {
       setReport(data);
+      setConflicts(null);
+      setErrorMsg(null);
       qc.invalidateQueries({ queryKey: ['boms'] });
       const { created, updated, skipped, failed } = data;
       const tone =
@@ -79,7 +85,15 @@ export const RecipeImportModal: React.FC<Props> = ({ open, onClose, defaultType 
         }
       );
     },
-    onError: (err: Error) => {
+    onError: (err: Error & { code?: string; conflicts?: string[] }) => {
+      if (err.code === 'codes_exist') {
+        setConflicts(err.conflicts ?? []);
+        toast(t.importCodesExistTitle, { type: 'error', message: err.message });
+        return;
+      }
+      // Persist the error in the modal (not just a vanishing toast) so the
+      // user always has feedback for a failed import.
+      setErrorMsg(err.message || t.rioImportFailedTitle);
       toast(t.rioImportFailedTitle, { type: 'error', message: err.message });
     },
   });
@@ -131,6 +145,21 @@ export const RecipeImportModal: React.FC<Props> = ({ open, onClose, defaultType 
         {!report && (
           <>
             <div className="rio-modal__body">
+              {conflicts && (
+                <div className="rio-conflicts" role="alert">
+                  <strong className="rio-conflicts__title">{t.importCodesExistTitle}</strong>
+                  <p className="rio-conflicts__desc">{t.importCodesExistDesc}</p>
+                  <ul className="rio-conflicts__list">
+                    {conflicts.map((c) => <li key={c}>{c}</li>)}
+                  </ul>
+                </div>
+              )}
+              {errorMsg && (
+                <div className="rio-conflicts" role="alert">
+                  <strong className="rio-conflicts__title">{t.rioImportFailedTitle}</strong>
+                  <p className="rio-conflicts__desc">{errorMsg}</p>
+                </div>
+              )}
               {/* ── Drop zone ─────────────────────────────────── */}
               <label
                 className={`rio-dropzone${dragging ? ' rio-dropzone--dragging' : ''}${file ? ' rio-dropzone--has-file' : ''}`}
@@ -251,34 +280,76 @@ export const RecipeImportModal: React.FC<Props> = ({ open, onClose, defaultType 
   );
 };
 
+type ReportFilter = 'all' | RecipeImportRowStatus;
+
 const ImportReport: React.FC<{ report: RecipeImportReport; onClose: () => void }> = ({ report, onClose }) => {
   const { t } = useLang();
+  const [filter, setFilter] = useState<ReportFilter>('all');
+
+  const rows = filter === 'all'
+    ? report.details
+    : report.details.filter((d) => d.status === filter);
+
+  // Print / Save-as-PDF just the report.  A body class flips a dedicated
+  // print stylesheet so only .rio-report is printed.
+  const handlePrint = () => {
+    const prevTitle = document.title;
+    document.title = `${t.rioReportTitle} — ${new Date().toLocaleDateString('en-GB')}`;
+    document.body.classList.add('print-import-report');
+    const cleanup = () => {
+      document.body.classList.remove('print-import-report');
+      document.title = prevTitle;
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    window.print();
+    setTimeout(cleanup, 1500);
+  };
+
+  // Clickable summary card.  Clicking a card filters the list to that
+  // status; clicking the active card (or "Total") resets to all.
+  const card = (key: ReportFilter, num: number, label: string, tone = '') => (
+    <button
+      type="button"
+      className={`rio-report__stat ${tone}${filter === key ? ' rio-report__stat--active' : ''}`}
+      onClick={() => setFilter(filter === key ? 'all' : key)}
+      aria-pressed={filter === key}
+    >
+      <span className="rio-report__stat-num">{num}</span>
+      <span className="rio-report__stat-label">{label}</span>
+    </button>
+  );
+
   return (
-    <div className="rio-report">
-      <div className="rio-report__summary">
-        <div className="rio-report__stat">
-          <span className="rio-report__stat-num">{report.total}</span>
-          <span className="rio-report__stat-label">{t.rioReportTotal}</span>
+    <div className="rio-report" id="rio-report-print">
+      <div className="rio-report__head rio-report__no-print">
+        <div>
+          <h3 className="rio-report__title">{t.rioReportTitle}</h3>
+          <p className="rio-report__subtitle">
+            {t.rioReportImported
+              .replace('{n}', String(report.created + report.updated))
+              .replace('{total}', String(report.total))}
+          </p>
         </div>
-        <div className="rio-report__stat rio-report__stat--created">
-          <span className="rio-report__stat-num">{report.created}</span>
-          <span className="rio-report__stat-label">{t.rioReportCreated}</span>
-        </div>
-        <div className="rio-report__stat rio-report__stat--updated">
-          <span className="rio-report__stat-num">{report.updated}</span>
-          <span className="rio-report__stat-label">{t.rioReportUpdated}</span>
-        </div>
-        <div className="rio-report__stat rio-report__stat--skipped">
-          <span className="rio-report__stat-num">{report.skipped}</span>
-          <span className="rio-report__stat-label">{t.rioReportSkipped}</span>
-        </div>
-        <div className="rio-report__stat rio-report__stat--failed">
-          <span className="rio-report__stat-num">{report.failed}</span>
-          <span className="rio-report__stat-label">{t.rioReportFailed}</span>
+        <div className="rio-report__tools">
+          <button className="btn btn--ghost btn--sm" onClick={handlePrint}>⎙ {t.rbViewPrint}</button>
+          <button className="btn btn--ghost btn--sm" onClick={handlePrint}>⭳ {t.rbViewPdf}</button>
         </div>
       </div>
 
-      {report.details.length === 0 ? (
+      {/* Print-only title (the toolbar above is hidden on paper) */}
+      <h3 className="rio-report__print-title">{t.rioReportTitle}</h3>
+
+      <div className="rio-report__summary">
+        {card('all',     report.total,   t.rioReportTotal)}
+        {card('created', report.created, t.rioReportCreated, 'rio-report__stat--created')}
+        {card('updated', report.updated, t.rioReportUpdated, 'rio-report__stat--updated')}
+        {card('skipped', report.skipped, t.rioReportSkipped, 'rio-report__stat--skipped')}
+        {card('failed',  report.failed,  t.rioReportFailed,  'rio-report__stat--failed')}
+      </div>
+      <p className="rio-report__hint rio-report__no-print">{t.rioReportClickHint}</p>
+
+      {rows.length === 0 ? (
         <p className="rio-report__empty">{t.rioReportEmpty}</p>
       ) : (
         <div className="rio-report__table-wrap">
@@ -292,10 +363,10 @@ const ImportReport: React.FC<{ report: RecipeImportReport; onClose: () => void }
               </tr>
             </thead>
             <tbody>
-              {report.details.map((d, i) => {
+              {rows.map((d, i) => {
                 const label = STATUS_LABELS[d.status];
                 return (
-                  <tr key={i}>
+                  <tr key={i} className={`rio-report__tr rio-report__tr--${d.status}`}>
                     <td className="rio-report__row-num">{d.row}</td>
                     <td className="rio-report__name">{d.name}</td>
                     <td>
@@ -312,7 +383,7 @@ const ImportReport: React.FC<{ report: RecipeImportReport; onClose: () => void }
         </div>
       )}
 
-      <div className="rio-modal__footer">
+      <div className="rio-modal__footer rio-report__no-print">
         <button className="btn btn--primary" onClick={onClose}>{t.rioClose}</button>
       </div>
     </div>

@@ -192,6 +192,45 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_items_weight_source ON items(weight_source);
 
+-- ------------------------------------------------------------
+-- Manual cost/weight overrides (Products tab inline editing)
+--   When a value is parsed wrong (or missing) an admin can override
+--   the cost price, the weight, and/or the cost-per-kg directly.
+--   These columns are NULL until overridden and are NEVER touched by
+--   the Odoo sync, so a manual correction survives future syncs.
+--   cost_overridden is the guard the sync checks before overwriting
+--   the canonical items.cost_per_kg.
+-- ------------------------------------------------------------
+ALTER TABLE items ADD COLUMN IF NOT EXISTS manual_raw_cost     NUMERIC(14, 6);
+ALTER TABLE items ADD COLUMN IF NOT EXISTS manual_weight_grams NUMERIC(12, 4);
+ALTER TABLE items ADD COLUMN IF NOT EXISTS manual_cost_per_kg  NUMERIC(14, 6);
+ALTER TABLE items ADD COLUMN IF NOT EXISTS cost_overridden     BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Archived-in-Odoo flag.  The sync also pulls Odoo's archived products
+-- (active = false) but stores them with is_active = FALSE so they stay
+-- out of recipes, search and the dashboard count.  This flag lets the
+-- Products tab optionally surface them via an "include archived" toggle.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS odoo_archived BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ------------------------------------------------------------
+-- Reference-code categories
+--   A recipe reference code is 3–5 uppercase letters + "-" + 4 digits
+--   (e.g. BAK-0001).  The manager defines the category prefixes here;
+--   the next free number per prefix is derived LIVE from the codes
+--   actually in use (boms / test_recipes / items.reference) so it never
+--   desyncs with manual edits or Excel imports.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS reference_code_categories (
+    id          SERIAL PRIMARY KEY,
+    prefix      VARCHAR(5)  NOT NULL UNIQUE
+                  CHECK (prefix ~ '^[A-Z]{3,5}$'),
+    description TEXT,
+    is_active   BOOLEAN     NOT NULL DEFAULT TRUE,
+    created_by  INTEGER     REFERENCES users(id) ON DELETE SET NULL,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Product thumbnail image synced from Odoo (stored as base64 data URI)
 ALTER TABLE items ADD COLUMN IF NOT EXISTS image_url TEXT;
 
@@ -310,7 +349,7 @@ CREATE TABLE IF NOT EXISTS users (
     email            VARCHAR(255),
     name             VARCHAR(255),
     role             VARCHAR(20)   NOT NULL DEFAULT 'customer'
-                       CHECK (role IN ('admin', 'customer')),
+                       CHECK (role IN ('admin', 'customer', 'manager')),
     can_view_prices  BOOLEAN,                                 -- NULL = follow role default
     is_active        BOOLEAN       NOT NULL DEFAULT TRUE,
     last_login       TIMESTAMPTZ,
@@ -318,10 +357,59 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at       TIMESTAMPTZ   DEFAULT NOW()
 );
 
+-- Local password hash (scrypt) for admin-created accounts that don't
+-- authenticate via Odoo.  NULL for Odoo / dev-admin users.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_users_odoo_uid  ON users(odoo_uid);
 CREATE INDEX IF NOT EXISTS idx_users_username  ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_role      ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
+
+-- Widen the role CHECK on already-existing databases to add 'manager'
+-- (a privileged role: superset of admin + the exclusive right to promote
+-- test recipes into the real lists).  Idempotent.
+DO $$ BEGIN
+  ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+  ALTER TABLE users ADD  CONSTRAINT users_role_check
+    CHECK (role IN ('admin', 'customer', 'manager'));
+END $$;
+
+-- ------------------------------------------------------------
+-- Test Recipes (kitchen sandbox)
+--   Recipes still in development.  Stored SEPARATELY from the real
+--   items/boms pipeline as a JSONB draft so they never leak into the
+--   real Base/Final lists and can't be used as ingredients elsewhere.
+--   A draft may contain "ad-hoc" ingredients (a name/code for a product
+--   that doesn't exist yet) — those show red and block promotion until
+--   resolved.  A manager promotes a finished draft into the real lists.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS test_recipes (
+    id             SERIAL PRIMARY KEY,
+    name           TEXT          NOT NULL,
+    reference_code TEXT,
+    recipe_type    VARCHAR(20)   NOT NULL DEFAULT 'base'
+                     CHECK (recipe_type IN ('base', 'final')),
+    -- 'draft'   → editable in the Test Recipes list
+    -- 'pending' → submitted for the main manager's approval
+    status         VARCHAR(20)   NOT NULL DEFAULT 'draft'
+                     CHECK (status IN ('draft', 'pending')),
+    review_note    TEXT,
+    draft          JSONB         NOT NULL DEFAULT '{}'::jsonb,
+    created_by     INTEGER       REFERENCES users(id) ON DELETE SET NULL,
+    created_at     TIMESTAMPTZ   DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ   DEFAULT NOW()
+);
+
+-- Add status to existing test_recipes tables (idempotent).
+ALTER TABLE test_recipes ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'draft';
+-- Manager's feedback when sending a recipe back for re-editing.
+ALTER TABLE test_recipes ADD COLUMN IF NOT EXISTS review_note TEXT;
+DO $$ BEGIN
+  ALTER TABLE test_recipes DROP CONSTRAINT IF EXISTS test_recipes_status_check;
+  ALTER TABLE test_recipes ADD  CONSTRAINT test_recipes_status_check
+    CHECK (status IN ('draft', 'pending'));
+END $$;
 
 DO $$ BEGIN
   CREATE TRIGGER trg_users_updated_at
@@ -432,6 +520,14 @@ CREATE INDEX IF NOT EXISTS idx_boms_updated_by ON boms(updated_by);
 ALTER TABLE boms ADD COLUMN IF NOT EXISTS packaging_cost NUMERIC(14, 6) NOT NULL DEFAULT 0;
 
 -- ------------------------------------------------------------
+-- Recipe archive — distinct from soft-delete (is_active=FALSE).
+-- Archived recipes stay in the DB and remain restorable; they are
+-- hidden from the main Kitchen Recipes list (the list filters
+-- archived = FALSE) but can be surfaced via an "archived" view.
+-- ------------------------------------------------------------
+ALTER TABLE boms ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ------------------------------------------------------------
 -- STEP 1.8 — bom_lines extensions
 --   • ingredient_type: explicit mirror of items.item_type so the
 --     line row is self-describing without a JOIN.  Values match
@@ -445,6 +541,28 @@ ALTER TABLE boms ADD COLUMN IF NOT EXISTS packaging_cost NUMERIC(14, 6) NOT NULL
 ALTER TABLE bom_lines ADD COLUMN IF NOT EXISTS ingredient_type        VARCHAR(20);
 ALTER TABLE bom_lines ADD COLUMN IF NOT EXISTS price_per_kg_snapshot  NUMERIC(14, 6);
 ALTER TABLE bom_lines ADD COLUMN IF NOT EXISTS line_cost              NUMERIC(14, 6);
+
+-- ------------------------------------------------------------
+-- Preparation steps (Kitchen Recipes builder)
+--   A recipe's ingredients can be grouped into numbered prep steps,
+--   each with a name and a free-text process explanation.  Steps are
+--   an ADDITIVE metadata layer: bom_lines stay flat (costing / recipe
+--   book / calculator are untouched); bom_lines.step_number links a
+--   line to its step.  Recipes saved before this feature have
+--   step_number NULL and load as a single default step.
+-- ------------------------------------------------------------
+ALTER TABLE bom_lines ADD COLUMN IF NOT EXISTS step_number INT;
+
+CREATE TABLE IF NOT EXISTS bom_steps (
+  id          SERIAL PRIMARY KEY,
+  bom_id      INTEGER NOT NULL REFERENCES boms(id) ON DELETE CASCADE,
+  step_number INT     NOT NULL,
+  step_name   TEXT,
+  description TEXT,
+  UNIQUE (bom_id, step_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bom_steps_bom_id ON bom_steps(bom_id);
 
 -- Back-fill ingredient_type on existing rows from items.item_type
 UPDATE bom_lines bl

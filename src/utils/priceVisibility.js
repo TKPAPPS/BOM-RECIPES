@@ -55,11 +55,12 @@ const PRICE_GROUPS = new Set(['pricing']);
  */
 function canViewPrices(user) {
   if (!user) return false;
-  if (user.role === 'admin') return true;
+  // Staff roles always see prices (manager is a superset of admin).
+  if (user.role === 'admin' || user.role === 'manager') return true;
   if (user.can_view_prices === true)  return true;
   if (user.can_view_prices === false) return false;
-  // can_view_prices IS NULL → fall back to role default
-  return user.role === 'admin'; // customer default = false
+  // can_view_prices IS NULL → fall back to role default (customer = false)
+  return false;
 }
 
 /**

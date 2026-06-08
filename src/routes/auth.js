@@ -4,6 +4,7 @@ const xmlrpc  = require('xmlrpc');
 
 const pool                = require('../config/db');
 const { logAudit, getIp } = require('../services/auditService');
+const { verifyPassword }  = require('../utils/password');
 
 const router = express.Router();
 
@@ -40,6 +41,46 @@ router.post('/login', async (req, res) => {
       return sendStoreUnavailable(res, '[auth] Dev-admin upsert failed', err);
     }
     return issueToken(res, localUser, ipAddress, { devLogin: true });
+  }
+
+  // ── 1b. Local password auth (admin-created accounts) ─────────────
+  // A user row with a password_hash authenticates locally, without
+  // touching Odoo.  If the username matches a local password account
+  // but the password is wrong, fail here (do NOT fall through to Odoo).
+  let localPwUser;
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, odoo_uid, username, name, email, role, can_view_prices,
+              is_active, password_hash
+         FROM users
+        WHERE LOWER(username) = LOWER($1) AND password_hash IS NOT NULL`,
+      [username]
+    );
+    localPwUser = rows[0];
+  } catch (err) {
+    return sendStoreUnavailable(res, '[auth] Local password lookup failed', err);
+  }
+
+  if (localPwUser) {
+    if (!verifyPassword(code, localPwUser.password_hash)) {
+      await logAudit({
+        userId: null, actionType: 'login_failure', entity: 'auth',
+        description: `Invalid local password for "${username}"`, ipAddress,
+      });
+      return res.status(401).json({ message: 'Invalid credentials.' });
+    }
+    if (localPwUser.is_active === false) {
+      await logAudit({
+        userId: localPwUser.id, actionType: 'login_denied', entity: 'user',
+        entityId: localPwUser.id,
+        description: `Deactivated account "${username}" attempted to log in.`, ipAddress,
+      });
+      return res.status(403).json({ message: 'Account is deactivated. Contact an administrator.' });
+    }
+    try {
+      await pool.query(`UPDATE users SET last_login = NOW(), updated_at = NOW() WHERE id = $1`, [localPwUser.id]);
+    } catch { /* non-fatal */ }
+    return issueToken(res, localPwUser, ipAddress, { devLogin: false });
   }
 
   // ── 2. Odoo XML-RPC auth ─────────────────────────────────────────
@@ -121,7 +162,10 @@ router.post('/login', async (req, res) => {
          username   = EXCLUDED.username,
          name       = COALESCE(EXCLUDED.name,  users.name),
          email      = COALESCE(EXCLUDED.email, users.email),
-         role       = COALESCE($5, users.role),
+         -- Never downgrade a 'manager' (highest role) just because Odoo
+         -- reports the user as a system admin — manager is assigned here.
+         role       = CASE WHEN users.role = 'manager' THEN 'manager'
+                           ELSE COALESCE($5, users.role) END,
          last_login = NOW(),
          updated_at = NOW()
        RETURNING id, odoo_uid, username, name, email, role, can_view_prices, is_active`,
@@ -247,15 +291,16 @@ function isDevAdminAttempt(username, code) {
 /**
  * Upsert the dev-admin user.  No odoo_uid (NULL is fine — Postgres
  * treats NULLs as distinct under UNIQUE), conflict target is the
- * username, role is forced to 'admin', is_active forced TRUE.
+ * username, role is forced to 'manager' (the highest role — full access
+ * incl. Settings + approvals), is_active forced TRUE.
  * can_view_prices is left as-is so the existing role-default applies.
  */
 async function upsertDevAdmin(username) {
   const { rows } = await pool.query(
     `INSERT INTO users (username, name, role, is_active, last_login)
-     VALUES ($1, $2, 'admin', TRUE, NOW())
+     VALUES ($1, $2, 'manager', TRUE, NOW())
      ON CONFLICT (username) DO UPDATE SET
-       role       = 'admin',
+       role       = 'manager',
        is_active  = TRUE,
        last_login = NOW(),
        updated_at = NOW()

@@ -44,6 +44,13 @@ export const toNum = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+/**
+ * The currency symbol shown in front of every price across the app.
+ * Single source of truth — change this one line to switch currencies.
+ * Currently Thai Baht (฿); the business operates in THB.
+ */
+export const CURRENCY_SYMBOL = '฿';
+
 export const fmtMoney = (n: number | string | null | undefined): string => {
   const num = toNum(n);
   return num != null

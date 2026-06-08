@@ -307,6 +307,22 @@ body {
   letter-spacing: 0.5px;
 }
 
+/* ── Reference-code: category select + code input on one row ── */
+.recipe-builder__refcode-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+.recipe-builder__refcode-row .recipe-builder__refcode-select {
+  flex: 2 1 0;   /* category: narrower */
+  min-width: 0;
+}
+.recipe-builder__refcode-row .recipe-builder__refcode-input {
+  flex: 3 1 0;   /* code: wider */
+  min-width: 0;
+}
+
 /* ── Inputs & Selects (shared) ───────────────────────────── */
 input[type="text"],
 input[type="number"],
@@ -995,6 +1011,541 @@ label {
   background: var(--gold-pale);
   border-style: solid;
   border-color: var(--gold);
+}
+
+/* ── Preparation steps (Kitchen Recipes builder) ──────────── */
+.rb-steps {
+  margin-top: 8px;
+}
+
+.rb-steps__title {
+  margin: 0 0 12px;
+  color: var(--burgundy);
+  font-size: 17px;
+  border-bottom: 2px solid var(--gold);
+  padding-bottom: 6px;
+}
+
+.rb-step {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-white);
+  box-shadow: var(--shadow-sm);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.rb-step__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.rb-step__number {
+  flex: 0 0 auto;
+  font-weight: 700;
+  color: #fff;
+  background: var(--burgundy);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.rb-step__name-field {
+  flex: 1 1 240px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.rb-step__name-field input {
+  flex: 1 1 auto;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 10px;
+  font-size: 14px;
+}
+
+.rb-step__name-field input:focus {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(203, 170, 106, .15);
+}
+
+.rb-step__remove {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-white);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.rb-step__remove:hover { color: #b91c1c; border-color: #f3c0c0; background: #fef2f2; }
+
+.rb-step__process {
+  display: block;
+  margin-top: 8px;
+}
+
+.rb-step__process-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.rb-step__process textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+}
+.rb-step__process textarea:focus {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(203, 170, 106, .15);
+}
+
+.rb-steps__add {
+  margin-bottom: 20px;
+}
+.rb-ingredients { margin-bottom: 8px; }
+.rb-step--readonly { background: var(--bg-light); }
+.rb-step--readonly .rb-step__head { margin-bottom: 4px; }
+.rb-steps__optional {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: none;
+}
+/* Optional step instructions in the scaled calculator */
+.rb-calc-steps { margin-top: 12px; }
+.rb-calc-step {
+  padding: 8px 10px;
+  border-top: 1px dashed var(--gold-light);
+  font-size: 13px;
+}
+.rb-calc-step:first-child { border-top: none; }
+.rb-calc-step__desc {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+
+/* ── Test recipes: ad-hoc (not-in-catalogue) ingredients ──── */
+.ingredient-table__row--adhoc {
+  background: #fef2f2;
+}
+.ingredient-row__input--adhoc {
+  border-color: #ef4444 !important;
+  color: #b91c1c;
+}
+.ingredient-row__ref-input {
+  width: 100%;
+  min-width: 90px;
+}
+.ingredient-row__dropdown-item--adhoc {
+  color: #b91c1c;
+  font-weight: 600;
+  border-top: 1px dashed var(--border);
+}
+.ingredient-row__badge--adhoc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px; height: 18px;
+  border-radius: 4px;
+  background: #ef4444;
+  color: #fff;
+  font-weight: 700;
+}
+.recipe-builder__test-badge {
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  border-radius: 4px;
+  padding: 2px 8px;
+  margin-inline-start: 8px;
+}
+
+/* ── Send-for-approval button (test builder, bottom, centered) ── */
+.recipe-builder__submit-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 24px;
+}
+.recipe-builder__submit-btn {
+  width: 100%;
+  max-width: 520px;
+  height: 46px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.recipe-builder__submit-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ── Test recipes list badges ─────────────────────────────── */
+.test-red-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px; height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+}
+.test-ok-badge { color: #16a34a; font-weight: 700; }
+
+/* ── Test recipe review (manager send-back) ───────────────── */
+.tr-review { background: var(--bg-light); }
+.tr-review__actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.tr-review__btn { min-width: 160px; }
+.tr-review__sendback { margin-top: 12px; }
+.tr-review__label { display: block; font-size: 13px; font-weight: 600; color: var(--burgundy); margin-bottom: 4px; }
+.tr-review__note {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+}
+.tr-review__sendback-actions { display: flex; gap: 8px; margin-top: 8px; }
+/* Manager's feedback banner shown to the author */
+.tr-review-note {
+  background: #fef9e7;
+  border: 1px solid #f0d98c;
+  border-inline-start: 4px solid var(--gold);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13.5px;
+  color: #6e5300;
+}
+.tr-list-note {
+  font-size: 12px;
+  color: #9a6a00;
+  margin-top: 2px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bom-history__subtitle {
+  margin: -6px 0 14px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Give the Kitchen Recipes page a little breathing room from the edge. */
+.kitchen-recipes { padding: 8px 4px 0; }
+
+/* ── Kitchen Recipes: Base / Final segmented tab header ────── */
+/* Sits between the search toolbar and the list, flush with the list. */
+.kr-tabs {
+  display: flex;
+  margin: 4px 0 0;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  overflow: hidden;
+  background: var(--bg-white);
+}
+.kr-tab {
+  flex: 1 1 50%;
+  padding: 9px 16px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-light);
+  border: none;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.kr-tab__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  margin-inline-start: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 999px;
+  background: var(--gold-pale);
+  color: var(--burgundy);
+}
+.kr-tab--active .kr-tab__count { background: rgba(255,255,255,0.22); color: #fff; }
+.kr-tab + .kr-tab { border-inline-start: 1px solid var(--border); }
+.kr-tab--active { background: var(--burgundy); color: #fff; }
+.kr-tab:not(.kr-tab--active):hover { background: var(--gold-pale); }
+/* Square the table's top corners so the tabs attach seamlessly. */
+.kitchen-recipes .bom-history__table {
+  margin-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+/* Sortable column headers */
+.bom-history__th--sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.bom-history__th--sortable:hover { color: var(--burgundy); }
+
+/* ── View toggle bar (cards / list) + bulk action bar ───────── */
+.kr-viewbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+.kr-viewbar__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-inline-start: auto;       /* push the toggles to the end of the bar */
+}
+.kr-archive-toggle--on {
+  background: var(--burgundy) !important;
+  color: #fff !important;
+  border-color: var(--burgundy) !important;
+}
+.bom-history__btn--restore {
+  color: var(--burgundy);
+  border-color: var(--gold);
+}
+.bom-history__btn--restore:hover { background: var(--gold-pale); }
+.kr-view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg-white);
+}
+.kr-view-toggle__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 34px;
+  border: none;
+  background: var(--bg-white);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.kr-view-toggle__btn + .kr-view-toggle__btn { border-inline-start: 1px solid var(--border); }
+.kr-view-toggle__btn:hover { background: var(--gold-pale); }
+.kr-view-toggle__btn--active { background: var(--burgundy); color: #fff; }
+
+.kr-bulkbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+  padding: 8px 12px;
+  background: var(--gold-pale);
+  border: 1px solid var(--gold);
+  border-radius: var(--radius);
+}
+.kr-bulkbar__count { font-weight: 700; color: var(--burgundy); }
+.kr-bulkbar__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.kr-bulkbar__danger { color: var(--error); }
+.kr-bulkbar__danger:hover { background: var(--error-light); }
+
+/* ── Cards grid ─────────────────────────────────────────────── */
+.kr-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 14px;
+  margin-top: 10px;
+}
+.kr-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: box-shadow var(--transition), transform var(--transition);
+}
+.kr-card:hover { box-shadow: 0 6px 18px rgba(0,0,0,0.08); transform: translateY(-2px); }
+.kr-card__media {
+  display: block;
+  height: 160px;          /* fixed height → every card's image is identical */
+  flex: 0 0 160px;        /* never stretch/shrink in the flex column */
+  background: var(--bg-light);
+  overflow: hidden;
+  text-decoration: none;  /* it's a link, but never underline the name on it */
+}
+.kr-card__img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Uniform name card for recipes without a real photo — fixed font size
+   for every recipe (no more placehold.co auto-shrunk text). */
+/* No-photo card face: soft cream with a sparse gold botanical line motif
+   and the recipe name set large in an elegant serif. */
+.kr-card__img--name {
+  width: 100%; height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 14px 16px;
+  box-sizing: border-box;
+  text-decoration: none;
+  background-color: #FCF8F1;
+  background-image: url('/card-botanical.svg');
+  background-size: 180px 180px;
+  background-position: center;
+  overflow: hidden;
+}
+/* the name text itself — elegant serif, vertically centred, clamped */
+.kr-card__name-on-media {
+  font-family: 'Quicksand', 'Segoe UI', system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  line-height: 1.3;
+  color: var(--burgundy);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.kr-card__body {
+  padding: 12px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 auto;
+}
+.kr-card__name {
+  font-family: 'Quicksand', 'Segoe UI', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: 0.2px;
+  color: var(--burgundy);
+  text-decoration: none;
+  line-height: 1.3;
+  transition: color var(--transition);
+}
+.kr-card__name:hover { color: var(--gold); text-decoration: none; }
+/* One clean, muted meta line: ref · yield · lines */
+.kr-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.kr-card__ref { font-weight: 600; letter-spacing: 0.3px; }
+.kr-card__meta-dot { opacity: 0.5; }
+.kr-card__actions {
+  display: flex; gap: 6px; padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+.kr-card__actions .bom-history__btn { flex: 1 1 0; justify-content: center; }
+
+/* ── Bulk recipe print page (/recipes/print) ───────────────── */
+.kr-print { padding: 16px; max-width: 900px; margin: 0 auto; }
+.kr-print__bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 16px;
+}
+.kr-print__count { font-weight: 700; color: var(--text-secondary); }
+.kr-print__recipe { margin-bottom: 28px; }
+.kr-print__head { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 14px; }
+.kr-print__img { width: 120px; height: 120px; object-fit: cover; border-radius: 8px; flex: 0 0 auto; }
+.kr-print__img--placeholder {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 40px; color: var(--gold); background: var(--gold-pale);
+}
+.kr-print__title { margin: 0; font-size: 22px; color: var(--burgundy); }
+.kr-print__ref { margin: 2px 0; font-size: 13px; color: var(--text-muted); }
+.kr-print__desc { margin: 6px 0; font-size: 13px; color: var(--text-secondary); }
+.kr-print__chips { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; font-size: 12px; }
+.kr-print__section { margin-top: 14px; }
+.kr-print__section-title {
+  font-size: 14px; color: var(--burgundy);
+  border-bottom: 1px solid var(--gold); padding-bottom: 4px; margin: 0 0 8px;
+}
+.kr-print__table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.kr-print__table th {
+  background: var(--burgundy); color: #fff; text-align: start;
+  padding: 6px 8px; font-size: 11px; text-transform: uppercase;
+}
+.kr-print__table td { padding: 5px 8px; border-bottom: 1px solid #e4d7bd; }
+.kr-print__cell-ref { color: var(--text-muted); }
+.kr-print__num { text-align: end; font-variant-numeric: tabular-nums; }
+.kr-print__steps { margin: 0; padding-inline-start: 20px; }
+.kr-print__step { margin-bottom: 8px; font-size: 13px; }
+.kr-print__step-name { display: block; color: var(--burgundy); }
+.kr-print__step-desc { margin: 2px 0 0; }
+
+@media print {
+  /* Unwind the app shell so the stacked pages flow + paginate cleanly.
+     (Another @media print block does `body * { visibility:hidden }`; we
+     re-show the kr-print subtree below to counteract it.) */
+  html, body, #root, .app, .app__body, .app__main {
+    display: block !important;
+    position: static !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+  .app__header, .app__sidebar, .app__menu-toggle { display: none !important; }
+
+  .kr-print, .kr-print * { visibility: visible !important; }
+  .kr-print__no-print { display: none !important; }
+  .kr-print { max-width: none; padding: 0; position: static; }
+  .kr-print__recipe { page-break-inside: avoid; break-inside: avoid; }
+  .kr-print__head, .kr-print__section { page-break-inside: avoid; break-inside: avoid; }
+  .kr-print__table tr { page-break-inside: avoid; break-inside: avoid; }
+  .kr-print__table thead { display: table-header-group; }
+  .kr-print, .kr-print * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  @page { size: A4; margin: 12mm; }
 }
 
 /* ── Actions Row ─────────────────────────────────────────── */
@@ -3406,6 +3957,15 @@ a.sidebar-nav__item {
   margin-bottom: 12px;
 }
 
+.rb-detail__print-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.rb-detail__print-actions { display: flex; gap: 8px; }
+
 .rb-detail__back-link {
   color: var(--burgundy);
   text-decoration: none;
@@ -3534,6 +4094,63 @@ a.sidebar-nav__item {
   margin: 4px 0 12px;
 }
 
+/* ── Preparation steps in the recipe-book detail ───────────── */
+.rb-detail__step {
+  margin-bottom: 18px;
+}
+.rb-detail__step-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+.rb-detail__step-num {
+  font-weight: 700;
+  color: #fff;
+  background: var(--burgundy);
+  border-radius: 999px;
+  padding: 2px 12px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.rb-detail__step-name { font-weight: 600; color: var(--burgundy); }
+.rb-detail__step-process {
+  margin: 8px 2px 0;
+  padding: 8px 12px;
+  background: var(--bg-light);
+  border-inline-start: 3px solid var(--gold);
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+
+/* ── Preparation steps inside the scaled calculator table ──── */
+.rb-calc-step-head > td {
+  background: var(--gold-pale);
+  padding: 8px 10px !important;
+}
+.rb-calc-step-head__num {
+  font-weight: 700;
+  color: #fff;
+  background: var(--burgundy);
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: 11px;
+  margin-inline-end: 8px;
+}
+.rb-calc-step-head__name { font-weight: 600; color: var(--burgundy); }
+.rb-calc-step-process > td {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  font-style: italic;
+  background: #fffdf8;
+  white-space: pre-wrap;
+}
+
 .rb-detail__batch-additions {
   margin-top: 12px;
   background: var(--bg-light);
@@ -3646,6 +4263,13 @@ a.sidebar-nav__item {
 }
 
 .rb-calculator__summary-cell--formula strong { font-size: 14px; }
+
+.rb-calculator__allergens {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.rb-calculator__allergens strong { color: var(--burgundy); }
 
 .rb-calculator__table {
   width: 100%;
@@ -3769,29 +4393,80 @@ a.sidebar-nav__item {
   .prep-sheet,
   .prep-sheet * { visibility: visible; }
 
+  /* Calculator "Print prep sheet" (NOT the whole-page detail print):
+     drop the on-screen result + page content from the flow so the
+     absolutely-positioned sheet doesn't sit beneath a tall stack of
+     hidden-but-space-occupying content (which adds blank trailing pages). */
+  body:not(.print-detail) .app__header,
+  body:not(.print-detail) .app__sidebar,
+  body:not(.print-detail) .app__menu-toggle,
+  body:not(.print-detail) .rb-detail > *:not(.rb-calculator),
+  body:not(.print-detail) .rb-calculator > *:not(.prep-sheet) {
+    display: none !important;
+  }
+
   .prep-sheet {
     display: block;
     position: absolute;
-    inset: 0;
-    padding: 24px;
+    top: 0;
+    left: 0;
+    right: 0;          /* NO bottom → height grows with content → paginates, no mid-page cut */
+    padding: 6mm 12mm; /* side/top breathing room, kept even with "Minimum" page margins */
     background: #fff;
     color: #000;
     font-family: 'Inter', Arial, sans-serif;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   @page { margin: 12mm; }
+
+  /* ── Whole-recipe print mode (from the Recipe Book detail) ──
+     Triggered by toggling body.print-detail.  Prints the full
+     .rb-detail page as shown instead of the calculator prep-sheet. */
+  body.print-detail .prep-sheet { display: none !important; }
+  body.print-detail .rb-detail,
+  body.print-detail .rb-detail * { visibility: visible !important; }
+  body.print-detail .rb-detail {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;          /* NO bottom → full height flows across pages, no mid-page cut */
+    margin: 0;
+    padding: 6mm 12mm; /* side/top breathing room, kept even with "Minimum" page margins */
+    background: #fff;
+  }
+  /* Don't split cards / rows / hero across a page boundary */
+  body.print-detail .rb-detail__hero,
+  body.print-detail .rb-detail__ingredients,
+  body.print-detail .rb-detail__step,
+  body.print-detail .recipe-view__table tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  body.print-detail .rb-detail__section-title,
+  body.print-detail .rb-detail__step-title {
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+  /* Hide on-screen-only controls inside the printed page */
+  body.print-detail .rb-detail__print-bar,
+  body.print-detail .rb-calculator__form,
+  body.print-detail .rb-calculator__print,
+  body.print-detail .rb-calculator__run { display: none !important; }
 }
 
 .prep-sheet__head h1 {
   margin: 0;
   font-size: 22px;
-  border-bottom: 2px solid #999;
+  color: #56133A;
+  border-bottom: 2px solid #CBAA6A;
   padding-bottom: 6px;
 }
 
 .prep-sheet__subtitle {
   margin: 4px 0 12px;
-  color: #555;
+  color: #8a6d2f;
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -3805,27 +4480,34 @@ a.sidebar-nav__item {
   padding: 0;
 }
 
-.prep-sheet__meta div { background: #f4f4f4; padding: 6px 10px; border-radius: 4px; }
-.prep-sheet__meta dt  { font-size: 10px; text-transform: uppercase; color: #666; margin: 0; }
-.prep-sheet__meta dd  { margin: 2px 0 0; font-weight: 700; font-size: 13px; }
+.prep-sheet__meta div { background: #fdf6e9; border: 1px solid #ecdcb8; padding: 6px 10px; border-radius: 4px; }
+.prep-sheet__meta dt  { font-size: 10px; text-transform: uppercase; color: #8a6d2f; margin: 0; }
+.prep-sheet__meta dd  { margin: 2px 0 0; font-weight: 700; font-size: 13px; color: #56133A; }
 
 .prep-sheet__allergens { font-size: 12px; margin: 6px 0; }
 .prep-sheet__serving   { font-size: 12px; color: #555; }
 
-.prep-sheet__section { margin-top: 18px; page-break-inside: avoid; }
+.prep-sheet__section {
+  margin-top: 18px;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
 
 .prep-sheet__section-title {
   font-size: 14px;
   margin: 0 0 6px;
   padding-bottom: 4px;
-  border-bottom: 1px solid #999;
+  color: #56133A;
+  border-bottom: 1px solid #CBAA6A;
   display: flex;
   align-items: center;
   gap: 8px;
+  page-break-after: avoid;
+  break-after: avoid;
 }
 
-.prep-sheet__section--level-1 { padding-inline-start: 14px; border-inline-start: 3px solid #ccc; }
-.prep-sheet__section--level-2 { padding-inline-start: 28px; border-inline-start: 3px solid #ddd; }
+.prep-sheet__section--level-1 { padding-inline-start: 14px; border-inline-start: 3px solid #CBAA6A; }
+.prep-sheet__section--level-2 { padding-inline-start: 28px; border-inline-start: 3px solid #ecdcb8; }
 
 .prep-sheet__section--shopping { page-break-before: always; }
 
@@ -3835,15 +4517,20 @@ a.sidebar-nav__item {
   font-size: 12px;
 }
 
+/* Repeat the column header on every printed page the table spans */
+.prep-sheet__table thead { display: table-header-group; }
+.prep-sheet__table tr { page-break-inside: avoid; break-inside: avoid; }
+
 .prep-sheet__table th,
 .prep-sheet__table td {
   padding: 5px 8px;
-  border-bottom: 1px solid #ddd;
+  border-bottom: 1px solid #e4d7bd;
   text-align: start;
 }
 
 .prep-sheet__table th {
-  background: #f4f4f4;
+  background: #56133A;
+  color: #fff;
   font-size: 10px;
   text-transform: uppercase;
 }
@@ -3855,7 +4542,8 @@ a.sidebar-nav__item {
 .prep-sheet__pill {
   font-size: 9px;
   text-transform: uppercase;
-  background: #eee;
+  background: #CBAA6A;
+  color: #56133A;
   padding: 2px 6px;
   border-radius: 3px;
   letter-spacing: .5px;
@@ -4051,6 +4739,32 @@ a.sidebar-nav__item {
   color: var(--text-secondary);
   font-size: 13px;
   margin: 0 0 16px;
+}
+
+.user-mgmt__create {
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+.user-mgmt__create-title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: var(--burgundy);
+}
+.user-mgmt__create-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.user-mgmt__create-row > .ingredient-row__input { flex: 1 1 150px; min-width: 130px; height: 36px; }
+.user-mgmt__create-row > select.ingredient-row__input { flex: 0 0 130px; }
+.user-mgmt__create-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .user-mgmt__table {
@@ -4771,6 +5485,63 @@ a.sidebar-nav__item {
   padding: 7px 14px;
 }
 
+/* ── Settings (gear) menu in the recipe view top bar ───────── */
+.recipe-view__menu { position: relative; }
+.recipe-view__gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-white);
+  color: var(--burgundy);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), transform var(--transition);
+}
+.recipe-view__gear:hover { background: var(--gold-pale); border-color: var(--gold); }
+.recipe-view__gear--open { background: var(--burgundy); color: #fff; border-color: var(--burgundy); }
+.recipe-view__gear:disabled { opacity: 0.6; cursor: default; }
+
+.recipe-view__menu-pop {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  min-width: 190px;
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.14);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.recipe-view__menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: start;
+  padding: 9px 12px;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background var(--transition), color var(--transition);
+}
+.recipe-view__menu-item:hover { background: var(--gold-pale); color: var(--burgundy); }
+.recipe-view__menu-item--danger { color: var(--error); }
+.recipe-view__menu-item--danger:hover { background: var(--error-light); color: var(--error); }
+.recipe-view__menu-item:disabled { opacity: 0.6; cursor: default; }
+
 /* ── Hero ────────────────────────────────────────────────── */
 .recipe-view__hero {
   display: grid;
@@ -5222,6 +5993,53 @@ a.sidebar-nav__item {
   border: 1px solid var(--gold-light);
   padding: 1px 6px;
   border-radius: 4px;
+}
+
+/* ── Clickable SUB-RECIPE pill (expands scaled ingredients) ── */
+.recipe-view__sub-pill--toggle {
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.4;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: background var(--transition);
+}
+.recipe-view__sub-pill--toggle:hover {
+  background: var(--gold-light);
+}
+.recipe-view__sub-caret { font-size: 8px; }
+
+/* ── Expanded sub-recipe breakdown rows ────────────────────── */
+.rb-subrecipe-row > td {
+  padding: 0 !important;
+  background: var(--gold-pale);
+  border-bottom: 1px solid var(--border);
+}
+.rb-subrecipe {
+  padding: 8px 14px 10px;
+}
+.rb-subrecipe--state {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.rb-subrecipe__row {
+  display: grid;
+  grid-template-columns: 1fr 140px 110px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px dashed var(--gold-light);
+  font-size: 12.5px;
+}
+.rb-subrecipe__row:first-child { border-top: none; }
+.rb-subrecipe__qty {
+  text-align: end;
+  font-weight: 600;
+  color: var(--burgundy);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Clickable name cell in BOM History ───────────────────── */
@@ -5746,6 +6564,90 @@ a.sidebar-nav__item {
 .rio-report__stat--skipped .rio-report__stat-num { color: #E65100; }
 .rio-report__stat--failed  { border-color: #FFCDD2; }
 .rio-report__stat--failed  .rio-report__stat-num { color: var(--error); }
+
+/* Clickable summary cards (filter the details list) */
+.rio-report__stat {
+  cursor: pointer;
+  font-family: inherit;
+  transition: box-shadow var(--transition), transform var(--transition), border-color var(--transition);
+}
+.rio-report__stat:hover { box-shadow: 0 3px 10px rgba(0,0,0,0.08); transform: translateY(-1px); }
+.rio-report__stat--active { outline: 2px solid var(--burgundy); outline-offset: -1px; }
+
+/* Report header (title + print/PDF tools) */
+.rio-report__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 22px 0;
+}
+.rio-report__title { margin: 0; font-size: 18px; color: var(--burgundy); }
+.rio-report__subtitle { margin: 2px 0 0; font-size: 13px; color: var(--text-secondary); }
+.rio-report__tools { display: flex; gap: 8px; flex-shrink: 0; }
+.rio-report__hint { margin: 0; padding: 0 22px 8px; font-size: 12px; color: var(--text-muted); }
+.rio-report__print-title { display: none; }
+.rio-report__tr--failed td { background: #FEF2F2; }
+.rio-report__msg { white-space: pre-wrap; }
+
+/* ── Print / Save-as-PDF the import report only ─────────────── */
+@media print {
+  /* The report is rendered in a portal that is a SIBLING of #root (the
+     whole app).  Hide #root entirely so only the report prints — otherwise
+     the app, laid out at full height, produced pages of blank before it. */
+  body.print-import-report #root { display: none !important; }
+  body.print-import-report {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  body.print-import-report .rio-report__no-print { display: none !important; }
+  body.print-import-report .rio-report__print-title {
+    display: block; margin: 0 0 10px; font-size: 20px; color: #56133A;
+    border-bottom: 2px solid #CBAA6A; padding-bottom: 6px;
+  }
+  /* Show only the report; neutralise the modal overlay/chrome. */
+  body.print-import-report .rio-modal-overlay,
+  body.print-import-report .rio-modal-overlay * { visibility: visible !important; }
+  body.print-import-report .rio-modal-overlay {
+    position: static !important;
+    inset: auto;
+    width: 100%;
+    background: #fff !important;
+    display: block !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+  body.print-import-report .rio-modal {
+    position: static !important;
+    max-width: none !important;
+    width: auto !important;
+    max-height: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+  body.print-import-report .rio-report__table-wrap {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+  body.print-import-report .rio-report__summary {
+    grid-template-columns: repeat(5, 1fr) !important;
+    background: #fff !important;
+  }
+  body.print-import-report .rio-report__table thead { display: table-header-group; }
+  body.print-import-report .rio-report__table tr { page-break-inside: avoid; break-inside: avoid; }
+  body.print-import-report .rio-report, body.print-import-report .rio-report * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  body.print-import-report .rio-modal__header { display: none !important; }
+}
 
 .rio-report__table-wrap {
   overflow: auto;

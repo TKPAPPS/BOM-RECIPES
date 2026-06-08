@@ -41,6 +41,8 @@ app.get('/api/health', async (_req, res) => {
 app.use('/api/items',      authMiddleware, pricesMiddleware, require('./routes/items'));
 app.use('/api/products',   authMiddleware, pricesMiddleware, require('./routes/products'));
 app.use('/api/boms',       authMiddleware, pricesMiddleware, require('./routes/boms'));
+app.use('/api/test-recipes', authMiddleware, pricesMiddleware, require('./routes/testRecipes'));
+app.use('/api/reference-codes', authMiddleware, pricesMiddleware, require('./routes/referenceCodeCategories'));
 app.use('/api/recipe-io',  authMiddleware, pricesMiddleware, require('./routes/recipeIO'));
 app.use('/api/pricing',    authMiddleware, pricesMiddleware, require('./routes/pricing'));
 app.use('/api/sync',       authMiddleware, pricesMiddleware, require('./routes/sync'));

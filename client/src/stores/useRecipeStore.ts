@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { nanoid } from 'nanoid';
-import type { IngredientLine, RecipeType } from '../types';
+import type { IngredientLine, RecipeStepDraft, RecipeType } from '../types';
 
 interface RecipeState {
   recipeName: string;
@@ -9,6 +9,8 @@ interface RecipeState {
   yieldKg: number;
   recipeType: RecipeType;
   lines: IngredientLine[];
+  /** Preparation steps (Kitchen Recipes). Every line belongs to one step. */
+  steps: RecipeStepDraft[];
   wholesaleMultiplier: number;
   retailMultiplier: number;
   pricingFormulaId: number | null;
@@ -25,6 +27,11 @@ interface RecipeState {
   servingSuggestion: string;
   servingsCount: number | null;
   totalWeight: number | null;
+  // Builder mode: 'real' edits real recipes (→ /boms); 'test' edits
+  // sandbox test recipes (→ /test-recipes) and allows ad-hoc ingredients.
+  mode: 'real' | 'test';
+  // When editing a test recipe, the test_recipes.id; null for a new draft.
+  testId: number | null;
   // P3-7: dirty tracking
   isDirty: boolean;
   // Which itemId the current store contents represent.  `null` means
@@ -53,6 +60,11 @@ interface RecipeState {
   addLine: () => void;
   removeLine: (lineId: string) => void;
   updateLine: (lineId: string, patch: Partial<IngredientLine>) => void;
+  addStep: () => void;
+  removeStep: (stepId: string) => void;
+  updateStep: (stepId: string, patch: Partial<Omit<RecipeStepDraft, 'id'>>) => void;
+  /** Replace all steps (e.g. final products pull steps from a base recipe). */
+  setSteps: (steps: RecipeStepDraft[]) => void;
   loadBom: (
     bom: {
       recipeName: string;
@@ -72,11 +84,40 @@ interface RecipeState {
       totalWeight?: number | null;
       pricingFormulaId?: number | null;
       lines: IngredientLine[];
+      steps: RecipeStepDraft[];
     },
     itemId: number | null,
   ) => void;
+  /** Load a test-recipe draft into the builder (mode='test'). */
+  loadTestDraft: (
+    bom: {
+      recipeName: string;
+      referenceCode: string;
+      yieldKg: number;
+      recipeType?: RecipeType;
+      laborCost?: number;
+      overheadCost?: number;
+      packagingCost?: number;
+      fullName?: string | null;
+      description?: string | null;
+      imageUrl?: string | null;
+      allergens?: string[] | null;
+      isSpicy?: boolean;
+      servingSuggestion?: string | null;
+      servingsCount?: number | null;
+      totalWeight?: number | null;
+      pricingFormulaId?: number | null;
+      lines: IngredientLine[];
+      steps: RecipeStepDraft[];
+    },
+    testId: number | null,
+  ) => void;
+  /** Reset to a fresh empty draft for the given mode. */
+  startDraft: (mode: 'real' | 'test') => void;
   reset: () => void;
 }
+
+const emptyStep = (): RecipeStepDraft => ({ id: nanoid(), name: '', description: '' });
 
 const emptyLine = (): IngredientLine => ({
   lineId: nanoid(),
@@ -99,21 +140,27 @@ const emptyExtras = () => ({
   totalWeight:       null as number | null,
 });
 
-const initialState = () => ({
-  recipeName: '',
-  referenceCode: '',
-  yieldKg: 1,
-  recipeType: 'base' as RecipeType,
-  lines: [emptyLine()],
-  wholesaleMultiplier: 2.5,
-  retailMultiplier: 5.0,
-  pricingFormulaId: null as number | null,
-  laborCost: 0,
-  overheadCost: 0,
-  ...emptyExtras(),
-  isDirty: false,
-  editingItemId: null as number | null,
-});
+const initialState = (mode: 'real' | 'test' = 'real') => {
+  return {
+    recipeName: '',
+    referenceCode: '',
+    yieldKg: 1,
+    recipeType: 'base' as RecipeType,
+    // Preparation steps are OPTIONAL instructions — start with none.
+    steps: [] as RecipeStepDraft[],
+    lines: [emptyLine()],
+    wholesaleMultiplier: 2.5,
+    retailMultiplier: 5.0,
+    pricingFormulaId: null as number | null,
+    laborCost: 0,
+    overheadCost: 0,
+    ...emptyExtras(),
+    mode,
+    testId: null as number | null,
+    isDirty: false,
+    editingItemId: null as number | null,
+  };
+};
 
 export const useRecipeStore = create<RecipeState>()(
   persist(
@@ -152,6 +199,25 @@ export const useRecipeStore = create<RecipeState>()(
           isDirty: true,
         })),
 
+      // Steps are optional instructions (name + description); they no
+      // longer carry their own ingredients.
+      addStep: () =>
+        set((s) => ({ steps: [...s.steps, emptyStep()], isDirty: true })),
+
+      removeStep: (stepId) =>
+        set((s) => ({
+          steps: s.steps.filter((st) => st.id !== stepId),
+          isDirty: true,
+        })),
+
+      setSteps: (steps) => set({ steps, isDirty: true }),
+
+      updateStep: (stepId, patch) =>
+        set((s) => ({
+          steps: s.steps.map((st) => (st.id === stepId ? { ...st, ...patch } : st)),
+          isDirty: true,
+        })),
+
       loadBom: (bom, itemId) =>
         set({
           recipeName:        bom.recipeName,
@@ -170,10 +236,41 @@ export const useRecipeStore = create<RecipeState>()(
           servingsCount:     bom.servingsCount ?? null,
           totalWeight:       bom.totalWeight   ?? null,
           pricingFormulaId:  bom.pricingFormulaId ?? null,
+          steps:             bom.steps,
           lines:             bom.lines,
+          mode:              'real',
+          testId:            null,
           isDirty:           false,
           editingItemId:     itemId,
         }),
+
+      loadTestDraft: (bom, testId) =>
+        set({
+          recipeName:        bom.recipeName,
+          referenceCode:     bom.referenceCode,
+          yieldKg:           bom.yieldKg,
+          recipeType:        bom.recipeType ?? 'base',
+          laborCost:         bom.laborCost     ?? 0,
+          overheadCost:      bom.overheadCost  ?? 0,
+          packagingCost:     bom.packagingCost ?? 0,
+          fullName:          bom.fullName     ?? '',
+          description:       bom.description  ?? '',
+          imageUrl:          bom.imageUrl     ?? '',
+          allergens:         bom.allergens    ?? [],
+          isSpicy:           bom.isSpicy      ?? false,
+          servingSuggestion: bom.servingSuggestion ?? '',
+          servingsCount:     bom.servingsCount ?? null,
+          totalWeight:       bom.totalWeight   ?? null,
+          pricingFormulaId:  bom.pricingFormulaId ?? null,
+          steps:             bom.steps,
+          lines:             bom.lines,
+          mode:              'test',
+          testId,
+          isDirty:           false,
+          editingItemId:     null,
+        }),
+
+      startDraft: (mode) => set(initialState(mode)),
 
       reset: () => set(initialState()),
     }),
@@ -184,13 +281,18 @@ export const useRecipeStore = create<RecipeState>()(
       // being edited.  This makes /recipe/new survive tab switches
       // and refreshes without leaking edits to existing recipes
       // (those are reloaded from the server via loadBom anyway).
-      partialize: (state) =>
-        state.editingItemId === null
+      partialize: (state) => {
+        // Persist only NEW drafts (not edits of a saved record), so the
+        // /recipe/new and /test-recipe/new forms survive navigation.
+        const isNewDraft =
+          state.mode === 'test' ? state.testId === null : state.editingItemId === null;
+        return isNewDraft
           ? {
               recipeName:        state.recipeName,
               referenceCode:     state.referenceCode,
               yieldKg:           state.yieldKg,
               recipeType:        state.recipeType,
+              steps:             state.steps,
               lines:             state.lines,
               pricingFormulaId:  state.pricingFormulaId,
               laborCost:         state.laborCost,
@@ -204,10 +306,13 @@ export const useRecipeStore = create<RecipeState>()(
               servingSuggestion: state.servingSuggestion,
               servingsCount:     state.servingsCount,
               totalWeight:       state.totalWeight,
+              mode:              state.mode,
+              testId:            null,
               isDirty:           state.isDirty,
               editingItemId:     null,
             }
-          : {},
+          : {};
+      },
     },
   ),
 );

@@ -178,6 +178,42 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
     return res.status(400).json({ error: 'No recipes were found in the file.' });
   }
 
+  // ── Pre-flight: reject the WHOLE file if any reference code already
+  // exists in the system (recipes / test recipes / raw materials).  The
+  // user must change those codes and re-upload — codes are unique.
+  //
+  // SKIP this guard in 'update' mode: there, existing codes are exactly
+  // the recipes the user intends to UPDATE (matched by code), so blocking
+  // them would make re-importing to update/add images impossible. ──
+  const fileCodes = [...new Set(
+    recipes.map((r) => (r.reference_code || '').trim()).filter(Boolean)
+  )];
+  if (onDuplicate !== 'update' && fileCodes.length) {
+    // Only ACTIVE rows reserve a code.  Soft-deleted recipes
+    // (is_active = FALSE) and inactive raw materials must NOT block a
+    // re-import — otherwise a code is stuck forever once its recipe is
+    // deleted.  (Archived recipes stay active, so they still reserve.)
+    const { rows: clashRows } = await pool.query(
+      `SELECT code FROM (
+         SELECT reference_code AS code FROM boms         WHERE reference_code IS NOT NULL AND is_active = TRUE
+         UNION ALL
+         SELECT reference_code AS code FROM test_recipes WHERE reference_code IS NOT NULL
+         UNION ALL
+         SELECT reference      AS code FROM items        WHERE reference      IS NOT NULL AND is_active = TRUE
+       ) all_codes
+       WHERE UPPER(code) = ANY($1::text[])`,
+      [fileCodes.map((c) => c.toUpperCase())]
+    );
+    if (clashRows.length) {
+      const conflicts = [...new Set(clashRows.map((r) => r.code))];
+      return res.status(409).json({
+        error: 'codes_exist',
+        message: 'These reference codes already exist in the system — change them and re-upload.',
+        conflicts,
+      });
+    }
+  }
+
   // Batch-resolve every distinct ingredient reference + name across
   // every recipe in the file with one query.
   const allCodes = recipes.flatMap((r) => r.lines.map((l) => l.code));
@@ -203,8 +239,11 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
     details:  [],   // [{ row, name, status, message }]
   };
 
-  for (const draft of recipes) {
-    const detail = { row: draft.rowNumber, name: draft.name, status: '', message: '' };
+  // Process a single recipe end-to-end and return its report detail.
+  // Pure w.r.t. shared state (no report mutation) so recipes can run
+  // concurrently — each opens its own pooled connection + transaction.
+  async function processOne(draft) {
+    const detail = { row: draft.rowNumber, name: draft.name, status: 'failed', message: '' };
 
     // ── Pre-flight: every ingredient must resolve ──
     const unresolved = [];
@@ -223,18 +262,12 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
       });
     }
     if (unresolved.length) {
-      report.failed++;
-      detail.status  = 'failed';
       detail.message = `Unknown ingredient code/name: ${unresolved.join(', ')}`;
-      report.details.push(detail);
-      continue;
+      return detail;
     }
     if (resolvedLines.length === 0) {
-      report.failed++;
-      detail.status  = 'failed';
       detail.message = 'No ingredient rows for this recipe.';
-      report.details.push(detail);
-      continue;
+      return detail;
     }
 
     // ── Dedup by ingredient_item_id ──
@@ -272,11 +305,9 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
 
       if (existingId && onDuplicate === 'skip') {
         await client.query('ROLLBACK');
-        report.skipped++;
         detail.status  = 'skipped';
         detail.message = 'A recipe with the same name or code already exists.';
-        report.details.push(detail);
-        continue;
+        return detail;
       }
 
       const payload = {
@@ -307,27 +338,51 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
 
       const warningSuffix = warnings.length ? ' ⚠ ' + warnings.join(' ') : '';
       if (existingId) {
-        report.updated++;
         detail.status  = 'updated';
         detail.message = `Recipe updated (v${result.version}).` + warningSuffix;
       } else {
-        report.created++;
         detail.status  = 'created';
         detail.message = `Recipe created (item #${result.item_id}).` + warningSuffix;
       }
-      report.details.push(detail);
+      return detail;
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
-      report.failed++;
       detail.status  = 'failed';
       detail.message =
         err.message?.includes('Circular dependency')
           ? `Circular dependency detected: ${err.message}`
           : (err.message || 'Unknown error.');
-      report.details.push(detail);
+      return detail;
     } finally {
       client.release();
     }
+  }
+
+  // ── Bounded-concurrency runner ──
+  // The DB is remote (~85ms/round-trip) and each recipe issues dozens of
+  // sequential queries, so processing recipes strictly one-at-a-time made
+  // an 88-recipe import take minutes.  Running a handful in parallel (each
+  // in its own transaction) cuts wall-clock ~N× while staying well under
+  // the pool's connection limit.  Results are kept in file order.
+  const CONCURRENCY = Math.min(6, recipes.length || 1);
+  const results = new Array(recipes.length);
+  let cursor = 0;
+  async function worker() {
+    for (;;) {
+      const i = cursor++;
+      if (i >= recipes.length) return;
+      results[i] = await processOne(recipes[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+
+  for (const detail of results) {
+    if (!detail) continue;
+    report.details.push(detail);
+    if (detail.status === 'created')      report.created++;
+    else if (detail.status === 'updated') report.updated++;
+    else if (detail.status === 'skipped') report.skipped++;
+    else                                  report.failed++;
   }
 
   // Single audit entry summarising the whole import (file-level event).

@@ -12,19 +12,34 @@
  */
 
 const xmlrpc = require('xmlrpc');
+const tls    = require('tls');
 const cron   = require('node-cron');
 const pool   = require('../config/db');
 const { logAudit } = require('./auditService');
-const { extractWeightFromName } = require('../utils/weightExtractor');
+const { resolveProductCost } = require('../utils/costResolver');
 
 // ─── XML-RPC client factory ──────────────────────────────────────────────────
 
 function makeClient(path) {
-  const url  = new URL(process.env.ODOO_URL);
-  const opts = { host: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80), path };
-  return url.protocol === 'https:'
-    ? xmlrpc.createSecureClient(opts)
-    : xmlrpc.createClient(opts);
+  const url     = new URL(process.env.ODOO_URL);
+  const isHttps = url.protocol === 'https:';
+  const opts = { host: url.hostname, port: url.port || (isHttps ? 443 : 80), path };
+
+  if (isHttps) {
+    // Odoo's "*.odoo.com" wildcard certificate only covers single-level
+    // subdomains, so a multi-level staging host like
+    // "<db>.dev.odoo.com" fails Node's default hostname check even though
+    // the certificate is valid and CA-signed.  Keep full chain validation
+    // (rejectUnauthorized stays true) but accept the hostname mismatch for
+    // the EXACT host we were configured to talk to in ODOO_URL.
+    opts.checkServerIdentity = (host, cert) => {
+      const err = tls.checkServerIdentity(host, cert);
+      if (err && host === url.hostname) return undefined; // trust the configured Odoo host
+      return err;
+    };
+    return xmlrpc.createSecureClient(opts);
+  }
+  return xmlrpc.createClient(opts);
 }
 
 function rpcCall(client, method, params) {
@@ -47,21 +62,73 @@ async function authenticate() {
   return uid;
 }
 
+// ─── Resolve the company to scope the sync to ────────────────────────────────
+//
+// The Odoo instance is multi-company (one company per Kosher Place
+// location).  We only want raw materials belonging to a single company.
+// Configure it with either ODOO_COMPANY_ID (exact id, skips the lookup)
+// or ODOO_COMPANY_NAME (looked up by name).  Defaults to the Thailand HQ.
+//
+// Returns the numeric company id, or null when no company could be
+// resolved (in which case the sync falls back to pulling all companies
+// and logs a prominent warning so the misconfiguration is visible).
+const DEFAULT_COMPANY_NAME = 'The Kosher Place (Thailand) Co. Ltd';
+
+async function resolveCompanyId(uid) {
+  const explicit = parseInt(process.env.ODOO_COMPANY_ID, 10);
+  if (Number.isInteger(explicit) && explicit > 0) return explicit;
+
+  const name = (process.env.ODOO_COMPANY_NAME || DEFAULT_COMPANY_NAME).trim();
+  const obj  = makeClient('/xmlrpc/2/object');
+  const ids  = await rpcCall(obj, 'execute_kw', [
+    process.env.ODOO_DB,
+    uid,
+    process.env.ODOO_PASSWORD,
+    'res.company',
+    'search',
+    [[['name', 'ilike', name]]],
+    { limit: 1 },
+  ]);
+
+  if (Array.isArray(ids) && ids.length > 0) return ids[0];
+
+  console.error(
+    `[odooSync] WARNING: company "${name}" not found in Odoo — ` +
+    `syncing ALL companies. Set ODOO_COMPANY_ID or fix ODOO_COMPANY_NAME.`
+  );
+  return null;
+}
+
 // ─── Fetch products from Odoo (one language at a time) ───────────────────────
 
-async function fetchOdooProducts(uid, lang) {
+async function fetchOdooProducts(uid, lang, companyId, opts = {}) {
   const obj = makeClient('/xmlrpc/2/object');
+  const archived = !!opts.archived;
+
+  // Normal fetch → active products only.  Archived fetch → active = false.
+  // Naming `active` in the domain disables Odoo's implicit hide-archived
+  // filter; active_test:false is required so the archived branch can see
+  // inactive rows at all (harmless for the normal branch since the domain
+  // pins active = true).
+  const domain = [['type', 'in', ['consu', 'product']], ['active', '=', !archived]];
+  if (companyId != null) {
+    // Scope to the target company.  Include `false` so company-shared
+    // products (available to every company, including this one) are not
+    // dropped — only OTHER companies' exclusive products are excluded.
+    domain.push(['company_id', 'in', [companyId, false]]);
+  }
+
   const args = [
     process.env.ODOO_DB,
     uid,
     process.env.ODOO_PASSWORD,
     'product.template',
     'search_read',
-    [[['type', 'in', ['consu', 'product']], ['active', '=', true]]],
+    [domain],
     {
       fields: ['id', 'name', 'default_code', 'uom_id', 'standard_price', 'weight', 'image_128', 'categ_id'],
       limit: 0,
-      context: { lang },
+      context: { lang, active_test: archived ? false : true },
     },
   ];
   return rpcCall(obj, 'execute_kw', args);
@@ -116,6 +183,7 @@ async function bulkUpsertProducts(client, rows) {
     const categOdooIds  = chunk.map((r) => r.categoryOdooId); // may contain NULLs
     const extractedG    = chunk.map((r) => r.weightExtractedGrams);
     const weightSrcs    = chunk.map((r) => r.weightSource);
+    const archivedFlags = chunk.map((r) => r.odooArchived);
 
     // UNNEST into a derived table first, then LEFT JOIN categories to resolve
     // the Odoo category ID → our local categories.id FK in a single round-trip.
@@ -123,7 +191,7 @@ async function bulkUpsertProducts(client, rows) {
       `INSERT INTO items
          (odoo_id, name, name_en, name_he, uom, reference, raw_cost, volume_weight,
           cost_per_kg, image_url, category_id,
-          weight_extracted_grams, weight_source,
+          weight_extracted_grams, weight_source, odoo_archived, is_active,
           item_type, last_synced_at, updated_at)
        SELECT
          u.odoo_id, u.name, u.name_en, u.name_he, u.uom, u.reference,
@@ -131,6 +199,8 @@ async function bulkUpsertProducts(client, rows) {
          c.id AS category_id,
          u.weight_extracted_grams,
          u.weight_source,
+         u.odoo_archived,
+         (NOT u.odoo_archived) AS is_active,   -- archived → inactive, active → active
          'raw_material',
          NOW(),
          NOW()
@@ -148,7 +218,8 @@ async function bulkUpsertProducts(client, rows) {
            unnest($10::text[])   AS image_url,
            unnest($11::int[])    AS categ_odoo_id,
            unnest($12::numeric[]) AS weight_extracted_grams,
-           unnest($13::text[])    AS weight_source
+           unnest($13::text[])    AS weight_source,
+           unnest($14::bool[])    AS odoo_archived
        ) u
        LEFT JOIN categories c ON c.odoo_id = u.categ_odoo_id
        ON CONFLICT (odoo_id) DO UPDATE SET
@@ -159,15 +230,23 @@ async function bulkUpsertProducts(client, rows) {
          reference              = EXCLUDED.reference,
          raw_cost               = EXCLUDED.raw_cost,
          volume_weight          = EXCLUDED.volume_weight,
-         cost_per_kg            = EXCLUDED.cost_per_kg,
+         -- Preserve a manually-overridden cost-per-kg; the manual_*
+         -- columns themselves are never in this upsert, so they survive.
+         cost_per_kg            = CASE WHEN items.cost_overridden
+                                       THEN items.cost_per_kg
+                                       ELSE EXCLUDED.cost_per_kg END,
          image_url              = EXCLUDED.image_url,
          category_id            = EXCLUDED.category_id,
          weight_extracted_grams = EXCLUDED.weight_extracted_grams,
          weight_source          = EXCLUDED.weight_source,
+         odoo_archived          = EXCLUDED.odoo_archived,
+         -- Re-activate un-archived products and deactivate newly-archived
+         -- ones in lock-step with the archived flag.
+         is_active              = EXCLUDED.is_active,
          last_synced_at         = NOW(),
          updated_at             = NOW()`,
       [odooIds, names, namesEN, namesHE, uoms, references, rawCosts, volumeWeights,
-       costPerKgs, imageUrls, categOdooIds, extractedG, weightSrcs]
+       costPerKgs, imageUrls, categOdooIds, extractedG, weightSrcs, archivedFlags]
     );
 
     total += chunk.length;
@@ -197,49 +276,43 @@ async function bulkUpsertCategories(client, rows) {
   return rows.length;
 }
 
+// ─── Product row builder ─────────────────────────────────────────────────────
+
 /**
- * Resolve the weight situation for one product.
- *
- * Returns a small struct so the caller knows BOTH the value to use
- * for cost calc AND where the value came from — critical so the
- * UI can flag estimated rows.
- *
- *   {
- *     odooWeightKg:           number|null,  // exactly what Odoo sent
- *     weightExtractedGrams:   number|null,  // regex on the name, in grams
- *     weightSource:           'odoo' | 'name_regex' | 'none',
- *     effectiveWeightKg:      number|null,  // value to use for cost_per_kg
- *   }
- *
- * The real Odoo weight ALWAYS wins when present.  We still try to
- * extract from the name even when Odoo has a weight, so the extracted
- * value is saved as a backup but is not used for costing.
+ * Shape one Odoo product.template record into the row our bulk upsert
+ * expects.  `archived` flags products fetched from Odoo's archive — they
+ * are stored but later forced is_active = FALSE by the deactivation step.
  */
-function resolveWeight(weight, productName) {
-  const odooKg = parseFloat(weight);
+function buildProductRow(p, heMap, archived) {
+  const rawCost = parseFloat(p.standard_price) || 0;
+  const odooKg  = parseFloat(p.weight);
   const hasOdoo = Number.isFinite(odooKg) && odooKg > 0;
+  // Auto-resolved cost (no manual overrides here — those are applied
+  // at read time and preserved across syncs via cost_overridden).
+  const c = resolveProductCost({ name: p.name, rawCost, odooWeightKg: p.weight });
 
-  const extracted = extractWeightFromName(productName);
-  const extractedGrams = extracted ? extracted.grams : null;
-
-  let source;
-  let effectiveKg;
-  if (hasOdoo) {
-    source      = 'odoo';
-    effectiveKg = odooKg;
-  } else if (extractedGrams != null && extractedGrams > 0) {
-    source      = 'name_regex';
-    effectiveKg = extractedGrams / 1000;
-  } else {
-    source      = 'none';
-    effectiveKg = null;
-  }
+  // Image guard: Odoo returns Python False (→ JS false), empty string, or
+  // a base64 PNG string.  Only store it when it looks like real image data.
+  const rawImage = (typeof p.image_128 === 'string' && p.image_128.length > 100)
+    ? p.image_128
+    : null;
+  const imageUrl = rawImage ? `data:image/png;base64,${rawImage}` : null;
 
   return {
-    odooWeightKg:         hasOdoo ? odooKg : null,
-    weightExtractedGrams: extractedGrams,
-    weightSource:         source,
-    effectiveWeightKg:    effectiveKg,
+    odooId:                p.id,
+    name:                  p.name,
+    nameEN:                p.name,
+    nameHE:                heMap.get(p.id) ?? null,
+    uom:                   p.uom_id ? p.uom_id[1] : 'kg',
+    reference:             p.default_code || null,
+    rawCost,
+    volumeWeight:          hasOdoo ? odooKg : null,        // only real Odoo weight
+    weightExtractedGrams:  c.weightExtractedGrams,         // real weight only (g)
+    weightSource:          c.weightSource,                 // 'odoo' | 'name_regex' | 'none'
+    costPerKg:             c.costPerKg,                     // kg / litre / unit / raw-cost fallback
+    imageUrl,
+    categoryOdooId:        Array.isArray(p.categ_id) ? p.categ_id[0] : null,
+    odooArchived:          !!archived,
   };
 }
 
@@ -258,18 +331,36 @@ async function syncFromOdoo() {
     throw err;
   }
 
-  // Fetch products in both languages (parallel for speed)
-  let productsEN, productsHE;
+  // Resolve which company to scope the catalogue to (multi-company Odoo).
+  let companyId = null;
   try {
-    [productsEN, productsHE] = await Promise.all([
-      fetchOdooProducts(uid, 'en_US'),
-      fetchOdooProducts(uid, 'he_IL').catch((err) => {
+    companyId = await resolveCompanyId(uid);
+    if (companyId != null) {
+      console.log(`[odooSync] Scoping products to company id ${companyId} ` +
+        `(${process.env.ODOO_COMPANY_NAME || DEFAULT_COMPANY_NAME}).`);
+    }
+  } catch (err) {
+    console.error('[odooSync] Company lookup failed (syncing all companies):', err.message);
+  }
+
+  // Fetch products in both languages (parallel for speed).  We also pull
+  // ARCHIVED products (in EN only) — stored but flagged so the Products tab
+  // can optionally surface them; they stay out of recipes/search/dashboard.
+  let productsEN, productsHE, productsArchived;
+  try {
+    [productsEN, productsHE, productsArchived] = await Promise.all([
+      fetchOdooProducts(uid, 'en_US', companyId),
+      fetchOdooProducts(uid, 'he_IL', companyId).catch((err) => {
         // Hebrew locale may not exist in all Odoo instances — degrade gracefully
         console.warn('[odooSync] Hebrew fetch failed (he_IL may not be installed):', err.message);
         return [];
       }),
+      fetchOdooProducts(uid, 'en_US', companyId, { archived: true }).catch((err) => {
+        console.warn('[odooSync] Archived fetch failed (continuing without archived):', err.message);
+        return [];
+      }),
     ]);
-    console.log(`[odooSync] Fetched ${productsEN.length} products (EN), ${productsHE.length} (HE)`);
+    console.log(`[odooSync] Fetched ${productsEN.length} active (EN), ${productsHE.length} (HE), ${productsArchived.length} archived`);
   } catch (err) {
     console.error('[odooSync] Product fetch error:', err.message);
     throw err;
@@ -293,39 +384,12 @@ async function syncFromOdoo() {
     name:   cat.complete_name || cat.name,
   }));
 
-  // Build product rows
-  const productRows = productsEN.map((p) => {
-    const rawCost = parseFloat(p.standard_price) || 0;
-    const w       = resolveWeight(p.weight, p.name);
-
-    // Image guard: Odoo returns Python False (→ JS false), empty string, or
-    // a base64 PNG string.  Only store it when it looks like real image data.
-    const rawImage = (typeof p.image_128 === 'string' && p.image_128.length > 100)
-      ? p.image_128
-      : null;
-    const imageUrl = rawImage ? `data:image/png;base64,${rawImage}` : null;
-
-    // volume_weight stores ONLY what Odoo returned — never the regex
-    // fallback.  When Odoo has no weight we save NULL, and the
-    // weight_extracted_grams / weight_source columns carry the fallback.
-    return {
-      odooId:                p.id,
-      name:                  p.name,
-      nameEN:                p.name,
-      nameHE:                heMap.get(p.id) ?? null,
-      uom:                   p.uom_id ? p.uom_id[1] : 'kg',
-      reference:             p.default_code || null,
-      rawCost,
-      volumeWeight:          w.odooWeightKg,                // only real Odoo weight
-      weightExtractedGrams:  w.weightExtractedGrams,        // always saved when extractable
-      weightSource:          w.weightSource,                // 'odoo' | 'name_regex' | 'none'
-      costPerKg:             w.effectiveWeightKg && w.effectiveWeightKg > 0
-                                ? rawCost / w.effectiveWeightKg
-                                : rawCost,
-      imageUrl,
-      categoryOdooId:        Array.isArray(p.categ_id) ? p.categ_id[0] : null,
-    };
-  });
+  // Build product rows — active first, then archived (flagged).  A product
+  // is either active or archived in Odoo, never both, so no odoo_id clashes.
+  const productRows = [
+    ...productsEN.map((p) => buildProductRow(p, heMap, false)),
+    ...productsArchived.map((p) => buildProductRow(p, heMap, true)),
+  ];
 
   const client = await pool.connect();
   let synced = 0, catsSynced = 0, errors = 0;

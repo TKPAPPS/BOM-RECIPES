@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180">
+  <g fill="none" stroke="#C7A24A" stroke-width="1" stroke-linecap="round" opacity="0.16">
+    <!-- slender sprig, lower-left -->
+    <path d="M24 156 C 36 124 52 116 58 86"/>
+    <path d="M40 130 C 24 126 22 137 38 139"/>
+    <path d="M50 106 C 66 101 70 110 54 114"/>
+    <!-- 5-petal flower atop the sprig -->
+    <g transform="translate(60 78)">
+      <ellipse cx="0" cy="-7.5" rx="2.6" ry="5.6"/>
+      <ellipse cx="0" cy="-7.5" rx="2.6" ry="5.6" transform="rotate(72)"/>
+      <ellipse cx="0" cy="-7.5" rx="2.6" ry="5.6" transform="rotate(144)"/>
+      <ellipse cx="0" cy="-7.5" rx="2.6" ry="5.6" transform="rotate(216)"/>
+      <ellipse cx="0" cy="-7.5" rx="2.6" ry="5.6" transform="rotate(288)"/>
+      <circle r="1.7"/>
+    </g>
+    <!-- a single small bud, upper-right, for sparse balance -->
+    <path d="M138 40 C 150 30 152 18 146 8"/>
+    <g transform="translate(138 44)">
+      <ellipse cx="0" cy="-5" rx="1.8" ry="3.8"/>
+      <ellipse cx="0" cy="-5" rx="1.8" ry="3.8" transform="rotate(72)"/>
+      <ellipse cx="0" cy="-5" rx="1.8" ry="3.8" transform="rotate(144)"/>
+      <ellipse cx="0" cy="-5" rx="1.8" ry="3.8" transform="rotate(216)"/>
+      <ellipse cx="0" cy="-5" rx="1.8" ry="3.8" transform="rotate(288)"/>
+    </g>
+  </g>
+</svg>

@@ -16,6 +16,7 @@
  */
 
 const pool = require('../config/db');
+const { resolvePricingForItem } = require('./pricingService');
 
 // ─── Queries ────────────────────────────────────────────────────────────────
 
@@ -26,8 +27,9 @@ const Q_ITEM = `
 `;
 
 const Q_BOM = `
-  SELECT b.id AS bom_id, b.yield_kg,
+  SELECT b.id AS bom_id, b.yield_kg, b.recipe_type,
          b.labor_cost, b.overhead_cost, b.packaging_cost,
+         l.id AS line_id,
          l.ingredient_item_id,
          l.quantity_kg,
          l.waste_pct
@@ -41,6 +43,23 @@ const Q_UPDATE_COST = `
   UPDATE items
   SET    cost_per_kg = $1, updated_at = NOW()
   WHERE  id = $2
+`;
+
+// Refresh the per-line frozen snapshots so the recipe detail view (which
+// reads bom_lines.line_cost / price_per_kg_snapshot) reflects the new
+// ingredient cost after a recalculation — not just the headline number.
+const Q_UPDATE_LINE = `
+  UPDATE bom_lines
+  SET    price_per_kg_snapshot = $1, line_cost = $2
+  WHERE  id = $3
+`;
+
+// Refresh the recipe-level snapshots on the BOM row itself.
+const Q_UPDATE_BOM = `
+  UPDATE boms
+  SET    cost_per_kg = $1, total_cost = $2,
+         wholesale_price = $3, retail_price = $4
+  WHERE  id = $5
 `;
 
 // ─── Core recursive function ─────────────────────────────────────────────────
@@ -81,6 +100,7 @@ async function calculateCostPerKg(itemId, ancestors = new Set(), client) {
     throw new Error(`Recipe "${item.name}" (id ${itemId}) has no active BOM`);
 
   const yieldKg = parseFloat(bomRows[0].yield_kg);
+  const bomId   = bomRows[0].bom_id;
   const newAncestors = new Set(ancestors).add(itemId);
 
   let materialCost = 0;
@@ -93,7 +113,11 @@ async function calculateCostPerKg(itemId, ancestors = new Set(), client) {
     const wastePct    = parseFloat(line.waste_pct) || 0;
     const wasteFactor = 1 - wastePct / 100;          // > 0 guaranteed by DB CHECK
     const effectiveQty = parseFloat(line.quantity_kg) / wasteFactor;
-    materialCost += effectiveQty * ingredientCost;
+    const lineCost     = effectiveQty * ingredientCost;
+    materialCost += lineCost;
+
+    // Refresh the frozen per-line snapshot so the recipe view updates too.
+    await db.query(Q_UPDATE_LINE, [ingredientCost, lineCost, line.line_id]);
   }
 
   // Add per-batch production costs (labour, overhead, packaging)
@@ -106,6 +130,23 @@ async function calculateCostPerKg(itemId, ancestors = new Set(), client) {
 
   // ── Persist the calculated value back to the item ────────────────────────
   await db.query(Q_UPDATE_COST, [costPerKg, itemId]);
+
+  // ── Refresh the recipe-level BOM snapshots (cost/total + prices) ──────────
+  // Mirrors the BOM save path so the recipe detail view — which reads these
+  // stored columns — shows current numbers after a recalc.  Resolve prices
+  // AFTER the item cost update above so the pricing engine sees the new cost.
+  let wholesalePrice = null;
+  let retailPrice    = null;
+  if (bomRows[0].recipe_type === 'final') {
+    try {
+      const pricing = await resolvePricingForItem(itemId, client);
+      wholesalePrice = pricing.wholesale_price ?? null;
+      retailPrice    = pricing.retail_price    ?? null;
+    } catch (err) {
+      console.warn(`[costing] price refresh skipped for item ${itemId}:`, err.message);
+    }
+  }
+  await db.query(Q_UPDATE_BOM, [costPerKg, totalCost, wholesalePrice, retailPrice, bomId]);
 
   return costPerKg;
 }

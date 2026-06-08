@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query';
-import { nanoid } from 'nanoid';
 import { BomDrillDownModal } from './components/BomDrillDown/BomDrillDownModal';
+import { buildRecipeDraftFromDetail } from './components/RecipeBuilder/recipeDraft';
 import { FormulaManager } from './components/FormulaManager/FormulaManager';
 import { UserManagementPanel } from './components/Settings/UserManagementPanel';
 import { OdooSyncPanel } from './components/Settings/OdooSyncPanel';
+import { ReferenceCodesPanel } from './components/Settings/ReferenceCodesPanel';
 import { ToastContainer } from './components/Toast/Toast';
 import { RecipeImportModal } from './components/RecipeIO/RecipeImportModal';
 import { LanguageProvider, useLang } from './context/LanguageContext';
@@ -13,7 +14,8 @@ import { useAuth } from './context/AuthContext';
 import { useRecipeStore } from './stores/useRecipeStore';
 import { useToastStore } from './stores/useToastStore';
 import { api, triggerBlobDownload } from './api';
-import type { BomSummary, BomSnapshot, IngredientLine, RecipeType } from './types';
+import { CURRENCY_SYMBOL } from './components/RecipeBook/imageHelpers';
+import type { BomSummary, BomSnapshot, RecipeType } from './types';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -156,7 +158,7 @@ const SnapshotPanel: React.FC<{ itemId: number; onClose: () => void }> = ({ item
 };
 
 /* ── BOM History ───────────────────────────────────────────── */
-export const BomHistory: React.FC<{ type: RecipeType }> = ({ type }) => {
+export const BomHistory: React.FC<{ type: RecipeType; embedded?: boolean; tabsSlot?: React.ReactNode; extraToolbarAction?: React.ReactNode }> = ({ type, embedded = false, tabsSlot = null, extraToolbarAction = null }) => {
   const qc = useQueryClient();
   const { t } = useLang();
   const navigate = useNavigate();
@@ -176,6 +178,27 @@ export const BomHistory: React.FC<{ type: RecipeType }> = ({ type }) => {
   // Date filters + per-row selection checkboxes only appear once the
   // user opens the export panel — otherwise the list shows clean.
   const [exportMode, setExportMode] = useState(false);
+  // Card vs. list view (only surfaced on the embedded Kitchen Recipes
+  // page).  Cards is the default; list adds selection + bulk actions.
+  const [viewMode, setViewMode] = useState<'cards' | 'list'>('cards');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  // Archived view — shows recipes moved to the archive (with Restore).
+  const [showArchived, setShowArchived] = useState(false);
+  // Column sort (list view headers).  null = server order (updated_at desc).
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+
+  const handleSort = (key: string) => {
+    setSort((prev) => {
+      if (prev && prev.key === key) {
+        return { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' };
+      }
+      // First click: names read best A→Z; everything else (codes, numbers,
+      // dates) most-useful high→low first.
+      return { key, dir: key === 'recipe_name' ? 'asc' : 'desc' };
+    });
+  };
+  const sortArrow = (key: string) =>
+    sort?.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
 
   // When the route switches between /recipes/base and /recipes/final
   // selection / filters from the previous tab no longer apply.
@@ -185,11 +208,15 @@ export const BomHistory: React.FC<{ type: RecipeType }> = ({ type }) => {
     setFromDate('');
     setToDate('');
     setExportMode(false);
+    setShowArchived(false);
   }, [type]);
 
+  // Switching between active / archived clears the current selection.
+  React.useEffect(() => { setSelectedIds(new Set()); }, [showArchived]);
+
   const { data: boms, isLoading, isError } = useQuery({
-    queryKey: ['boms', type],
-    queryFn: () => api.getBoms(type),
+    queryKey: ['boms', type, showArchived],
+    queryFn: () => api.getBoms(type, { archived: showArchived }),
   });
 
   const pageTitle   = type === 'base'  ? t.baseRecipes  : t.finalProducts;
@@ -216,6 +243,34 @@ export const BomHistory: React.FC<{ type: RecipeType }> = ({ type }) => {
       return true;
     });
   }, [boms, searchText, fromDate, toDate]);
+
+  // ── Column sort (applied to both list + cards so order persists) ──
+  const sortedBoms = useMemo<BomSummary[]>(() => {
+    if (!sort) return filteredBoms;
+    const numericKeys = new Set([
+      'yield_kg', 'cost_per_kg', 'total_cost', 'wholesale_for_yield',
+      'retail_for_yield', 'line_count', 'version',
+    ]);
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    const val = (b: BomSummary) => (b as unknown as Record<string, unknown>)[sort.key];
+    const arr = [...filteredBoms];
+    arr.sort((a, b) => {
+      let cmp: number;
+      if (sort.key === 'updated_at') {
+        cmp = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
+      } else if (numericKeys.has(sort.key)) {
+        const na = Number(val(a)); const nb = Number(val(b));
+        const aa = Number.isFinite(na) ? na : -Infinity;
+        const bb = Number.isFinite(nb) ? nb : -Infinity;
+        cmp = aa - bb;
+      } else {
+        // text (name / reference_code) — numeric-aware so BAS-0009 < BAS-0088
+        cmp = String(val(a) ?? '').localeCompare(String(val(b) ?? ''), undefined, { numeric: true, sensitivity: 'base' });
+      }
+      return cmp * dir;
+    });
+    return arr;
+  }, [filteredBoms, sort]);
 
   // Selected ids are visible-list aware: when the user filters the
   // list, only currently-visible selections are counted (others stay
@@ -310,30 +365,10 @@ export const BomHistory: React.FC<{ type: RecipeType }> = ({ type }) => {
     setEditingId(bom.id);
     try {
       const detail = await api.getBom(bom.item_id);
-      const lines: IngredientLine[] = detail.lines.map((l) => {
-        const lineUom = l.line_uom ?? 'kg';
-        return {
-          lineId: nanoid(),
-          item: {
-            id:            l.ingredient_id,
-            name:          l.ingredient,
-            name_en:       l.name_en   ?? null,
-            name_he:       l.name_he   ?? null,
-            reference:     l.reference ?? null,
-            type:          l.item_type,
-            cost_per_kg:   l.cost_per_kg,
-            unit:          l.unit ?? 'kg',
-            volume_weight: null,
-            image_url:     l.image_url ?? null,
-          },
-          line_uom:       lineUom,
-          waste_pct:      l.waste_pct ?? 0,
-          quantity_kg:    l.quantity_kg,
-          quantity_input: l.quantity_kg,
-        };
-      });
+      const { steps, lines } = buildRecipeDraftFromDetail(detail);
       loadBom(
         {
+          steps,
           recipeName:        detail.recipe_name,
           referenceCode:     detail.reference_code ?? '',
           yieldKg:           detail.yield_kg,
@@ -363,15 +398,87 @@ export const BomHistory: React.FC<{ type: RecipeType }> = ({ type }) => {
   };
 
   const handleDelete = async (bom: BomSummary) => {
-    if (!window.confirm(`Are you sure you want to delete "${bom.recipe_name}"?`)) return;
+    if (!window.confirm(t.confirmDeleteRecipe.replace('{name}', bom.recipe_name))) return;
     setDeletingId(bom.id);
     try {
       await api.deleteBom(bom.id);
       qc.invalidateQueries({ queryKey: ['boms', type] });
-    } catch {
-      alert('Failed to delete recipe.');
+      toast(t.recipeDeleted, { type: 'success' });
+    } catch (err) {
+      const msg = (err as Error).message || '';
+      // 409 in_use → recipe is a sub-recipe of another recipe
+      toast(t.deleteFailed, {
+        type: 'error',
+        message: msg.includes('in_use') || msg.includes('sub-recipe') ? t.deleteInUse : msg,
+      });
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  // ── Bulk actions (list view) — operate on the visible selection ──
+  const selectedItemIds = useMemo(
+    () => filteredBoms.filter((b) => selectedIds.has(b.item_id)).map((b) => b.item_id),
+    [filteredBoms, selectedIds],
+  );
+
+  const handleBulkDelete = async () => {
+    if (!selectedItemIds.length) return;
+    if (!window.confirm(t.bulkConfirmDelete.replace('{n}', String(selectedItemIds.length)))) return;
+    setBulkBusy(true);
+    try {
+      const { count, blocked } = await api.bulkDeleteBoms(selectedItemIds);
+      qc.invalidateQueries({ queryKey: ['boms', type] });
+      setSelectedIds(new Set());
+      if (blocked && blocked.length) {
+        toast(t.bulkDeleted.replace('{n}', String(count)), {
+          type: 'warning',
+          message: t.bulkBlocked.replace('{n}', String(blocked.length)),
+        });
+      } else {
+        toast(t.bulkDeleted.replace('{n}', String(count)), { type: 'success' });
+      }
+    } catch (err) {
+      toast(t.failedToLoad, { type: 'error', message: (err as Error).message });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const handleBulkArchive = async () => {
+    if (!selectedItemIds.length) return;
+    if (!window.confirm(t.bulkConfirmArchive.replace('{n}', String(selectedItemIds.length)))) return;
+    setBulkBusy(true);
+    try {
+      const { count } = await api.bulkArchiveBoms(selectedItemIds, true);
+      qc.invalidateQueries({ queryKey: ['boms', type] });
+      setSelectedIds(new Set());
+      toast(t.bulkArchived.replace('{n}', String(count)), { type: 'success' });
+    } catch (err) {
+      toast(t.failedToLoad, { type: 'error', message: (err as Error).message });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const handleBulkPrint = () => {
+    if (!selectedItemIds.length) return;
+    navigate(`/recipes/print?ids=${selectedItemIds.join(',')}`);
+  };
+
+  // Restore (un-archive) — used in the archived view (bulk + per-row).
+  const restoreItems = async (ids: number[]) => {
+    if (!ids.length) return;
+    setBulkBusy(true);
+    try {
+      const { count } = await api.bulkArchiveBoms(ids, false);
+      qc.invalidateQueries({ queryKey: ['boms'] });
+      setSelectedIds(new Set());
+      toast(t.bulkRestored.replace('{n}', String(count)), { type: 'success' });
+    } catch (err) {
+      toast(t.failedToLoad, { type: 'error', message: (err as Error).message });
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -381,6 +488,171 @@ export const BomHistory: React.FC<{ type: RecipeType }> = ({ type }) => {
   const filtersActive = searchText.trim() !== '' || fromDate !== '' || toDate !== '';
   const totalCount    = (boms ?? []).length;
   const selectedTotal = selectedIds.size;
+
+  // View-toggle is only offered on the embedded Kitchen Recipes page.
+  // Cards = default browse view; List = table with selection + bulk bar.
+  const showViewToggle = embedded;
+  const useCards       = embedded && viewMode === 'cards';
+  // Show the per-row checkboxes when exporting (any route) OR in the
+  // embedded list view (so bulk actions have a selection to act on).
+  const showCheckboxes = exportMode || (embedded && viewMode === 'list');
+  const showBulkBar    = embedded && viewMode === 'list' && selectedTotal > 0;
+
+  // ── Cards / List view toggle (two icon buttons) ──
+  const viewToggle = showViewToggle ? (
+    <div className="kr-view-toggle" role="group" aria-label={t.viewMode}>
+      <button
+        type="button"
+        className={`kr-view-toggle__btn${viewMode === 'cards' ? ' kr-view-toggle__btn--active' : ''}`}
+        aria-pressed={viewMode === 'cards'}
+        onClick={() => setViewMode('cards')}
+        title={t.viewCards}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        className={`kr-view-toggle__btn${viewMode === 'list' ? ' kr-view-toggle__btn--active' : ''}`}
+        aria-pressed={viewMode === 'list'}
+        onClick={() => setViewMode('list')}
+        title={t.viewList}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" />
+          <line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" />
+        </svg>
+      </button>
+    </div>
+  ) : null;
+
+  // ── Archived ⇄ Active view toggle (embedded only) ──
+  const archivedToggle = showViewToggle ? (
+    <button
+      type="button"
+      className={`btn btn--ghost btn--sm kr-archive-toggle${showArchived ? ' kr-archive-toggle--on' : ''}`}
+      onClick={() => setShowArchived((v) => !v)}
+      title={showArchived ? t.viewActive : t.viewArchived}
+    >
+      🗄 {showArchived ? t.viewActive : t.viewArchived}
+    </button>
+  ) : null;
+
+  // ── Bulk action bar (list view, when ≥1 selected) ──
+  const bulkBar = showBulkBar ? (
+    <div className="kr-bulkbar">
+      <span className="kr-bulkbar__count">{t.bulkSelected.replace('{n}', String(selectedTotal))}</span>
+      <div className="kr-bulkbar__actions">
+        <button className="btn btn--ghost btn--sm" onClick={handleExport} disabled={exporting || bulkBusy}>
+          {exporting ? '…' : `⭳ ${t.rioExportBtn}`}
+        </button>
+        <button className="btn btn--ghost btn--sm" onClick={handleBulkPrint} disabled={bulkBusy}>
+          ⎙ {t.rbViewPrint}
+        </button>
+        {showArchived ? (
+          <button className="btn btn--ghost btn--sm" onClick={() => restoreItems(selectedItemIds)} disabled={bulkBusy}>
+            ♻ {t.restore}
+          </button>
+        ) : (
+          <button className="btn btn--ghost btn--sm" onClick={handleBulkArchive} disabled={bulkBusy}>
+            🗄 {t.archive}
+          </button>
+        )}
+        <button className="btn btn--ghost btn--sm kr-bulkbar__danger" onClick={handleBulkDelete} disabled={bulkBusy}>
+          🗑 {t.delete}
+        </button>
+        <button className="btn btn--ghost btn--sm" onClick={() => setSelectedIds(new Set())} disabled={bulkBusy}>
+          ✕ {t.clear}
+        </button>
+      </div>
+    </div>
+  ) : null;
+
+  // ── Cards view (compact recipe cards grid) ──
+  const cardsGrid = (
+    <div className="kr-cards">
+      {sortedBoms.map((b) => {
+        // A "real photo" is anything that isn't one of the auto-generated
+        // placehold.co text placeholders (those bake the name into the PNG
+        // at varying sizes).  For non-photos we render a uniform CSS card
+        // so every recipe's name shows at the SAME fixed size.
+        const isRealPhoto = !!b.image_url && !b.image_url.includes('placehold.co');
+        return (
+        <div className="kr-card" key={b.id}>
+          <NavLink to={`/recipes/view/${b.item_id}`} className="kr-card__media">
+            {isRealPhoto ? (
+              <>
+                <img
+                  className="kr-card__img"
+                  src={b.image_url as string}
+                  alt=""
+                  loading="lazy"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                    (e.currentTarget.nextElementSibling as HTMLElement | null)?.removeAttribute('style');
+                  }}
+                />
+                {/* fallback shown only if the photo fails to load */}
+                <span className="kr-card__img kr-card__img--name" style={{ display: 'none' }}>
+                  <span className="kr-card__name-on-media">{b.recipe_name}</span>
+                </span>
+              </>
+            ) : (
+              <span className="kr-card__img kr-card__img--name">
+                <span className="kr-card__name-on-media">{b.recipe_name}</span>
+              </span>
+            )}
+          </NavLink>
+          <div className="kr-card__body">
+            {/* Photo cards carry the name here; no-photo cards show the name
+                on the cream botanical media above, so don't repeat it. */}
+            {isRealPhoto && (
+              <NavLink to={`/recipes/view/${b.item_id}`} className="kr-card__name">{b.recipe_name}</NavLink>
+            )}
+            <div className="kr-card__meta">
+              {b.reference_code && <span className="kr-card__ref">{b.reference_code}</span>}
+              <span className="kr-card__meta-dot">·</span>
+              <span>{fmt(b.yield_kg) || '—'} kg</span>
+              <span className="kr-card__meta-dot">·</span>
+              <span>{b.line_count} {t.linesHeader}</span>
+            </div>
+          </div>
+          <div className="kr-card__actions">
+            {showArchived ? (
+              <button
+                className="bom-history__btn bom-history__btn--restore"
+                onClick={() => restoreItems([b.item_id])}
+                disabled={bulkBusy}
+                title={t.restore}
+              >
+                ♻ {t.restore}
+              </button>
+            ) : (
+              <button
+                className="bom-history__btn bom-history__btn--edit"
+                onClick={() => handleEdit(b)}
+                disabled={editingId === b.id}
+                title={t.edit}
+              >
+                {editingId === b.id ? '…' : t.edit}
+              </button>
+            )}
+            <button
+              className="bom-history__btn bom-history__btn--delete"
+              onClick={() => handleDelete(b)}
+              disabled={deletingId === b.id}
+              title={t.delete}
+            >
+              {deletingId === b.id ? '…' : t.delete}
+            </button>
+          </div>
+        </div>
+        );
+      })}
+    </div>
+  );
 
   // Shared toolbar / import-modal markup so the empty-state path
   // can still expose Import + Template (the user has to be able to
@@ -404,6 +676,7 @@ export const BomHistory: React.FC<{ type: RecipeType }> = ({ type }) => {
       exportMode={exportMode}
       onOpenExportMode={() => setExportMode(true)}
       onCancelExportMode={cancelExportMode}
+      extraAction={extraToolbarAction}
     />
   );
 
@@ -415,50 +688,56 @@ export const BomHistory: React.FC<{ type: RecipeType }> = ({ type }) => {
     />
   );
 
-  if (!boms?.length) {
-    return (
-      <div className="bom-history">
+  // Single return (no separate empty-state return).  Rendering the import
+  // modal from two different return branches made it REMOUNT when the list
+  // went from empty → populated after an import — which reset the modal and
+  // hid the result report.  Keeping one return mounts it at a stable spot.
+  const noRecipesAtAll = !boms?.length;
+
+  return (
+    <div className="bom-history">
+      {!embedded && (
         <div className="bom-history__header">
           <h2 className="bom-history__title">{pageTitle}</h2>
+          <span className="bom-history__count">
+            {filtersActive
+              ? t.rioRecipesShown.replace('{n}', String(filteredBoms.length)).replace('{total}', String(totalCount))
+              : `${totalCount} recipe${totalCount !== 1 ? 's' : ''}`}
+          </span>
           <NavLink to="/recipe/new" className="btn btn--primary bom-history__new-btn">
             + New Recipe
           </NavLink>
         </div>
-        {toolbar}
-        <div className="view-placeholder view-placeholder--inline">
-          <div className="view-placeholder__icon">{type === 'base' ? '◈' : '◉'}</div>
-          <h3 className="view-placeholder__title">{pageTitle}</h3>
-          <p className="view-placeholder__text">{emptyText}</p>
-        </div>
-        {importPortal}
-      </div>
-    );
-  }
-
-  return (
-    <div className="bom-history">
-      <div className="bom-history__header">
-        <h2 className="bom-history__title">{pageTitle}</h2>
-        <span className="bom-history__count">
-          {filtersActive
-            ? t.rioRecipesShown.replace('{n}', String(filteredBoms.length)).replace('{total}', String(totalCount))
-            : `${totalCount} recipe${totalCount !== 1 ? 's' : ''}`}
-        </span>
-        <NavLink to="/recipe/new" className="btn btn--primary bom-history__new-btn">
-          + New Recipe
-        </NavLink>
-      </div>
+      )}
       {toolbar}
-      {filteredBoms.length === 0 && (
+      {tabsSlot}
+      {(showViewToggle || showBulkBar) && (
+        <div className="kr-viewbar">
+          {bulkBar}
+          <div className="kr-viewbar__right">
+            {archivedToggle}
+            {viewToggle}
+          </div>
+        </div>
+      )}
+      {noRecipesAtAll && (
+        <div className="view-placeholder view-placeholder--inline">
+          <div className="view-placeholder__icon">{showArchived ? '🗄' : (type === 'base' ? '◈' : '◉')}</div>
+          <h3 className="view-placeholder__title">{showArchived ? t.viewArchived : pageTitle}</h3>
+          <p className="view-placeholder__text">{showArchived ? t.archiveEmpty : emptyText}</p>
+        </div>
+      )}
+      {!noRecipesAtAll && filteredBoms.length === 0 && (
         <div className="view-placeholder view-placeholder--inline">
           <p className="view-placeholder__text">{t.rioNoRowsToExport}</p>
         </div>
       )}
-      {filteredBoms.length > 0 && (
+      {!noRecipesAtAll && filteredBoms.length > 0 && useCards && cardsGrid}
+      {!noRecipesAtAll && filteredBoms.length > 0 && !useCards && (
       <table className="bom-history__table">
         <thead>
           <tr>
-            {exportMode && (
+            {showCheckboxes && (
               <th className="bom-history__select-col">
                 <input
                   type="checkbox"
@@ -468,29 +747,28 @@ export const BomHistory: React.FC<{ type: RecipeType }> = ({ type }) => {
                 />
               </th>
             )}
-            <th className="bom-history__name-col">{t.recipeName}</th>
-            <th className="bom-history__ref-col">{t.refCode}</th>
-            <th className="bom-history__num bom-history__num-col">{t.yieldKg}</th>
-            {type === 'base' ? (
-              <th className="bom-history__num bom-history__num-col">{t.costPerKg}</th>
-            ) : (
+            <th className="bom-history__name-col bom-history__th--sortable" onClick={() => handleSort('recipe_name')}>{t.recipeName}{sortArrow('recipe_name')}</th>
+            <th className="bom-history__ref-col bom-history__th--sortable" onClick={() => handleSort('reference_code')}>{t.refCode}{sortArrow('reference_code')}</th>
+            <th className="bom-history__num bom-history__num-col bom-history__th--sortable" onClick={() => handleSort('yield_kg')}>{t.yieldKg}{sortArrow('yield_kg')}</th>
+            <th className="bom-history__num bom-history__num-col bom-history__th--sortable" onClick={() => handleSort('cost_per_kg')}>{t.costPerKg}{sortArrow('cost_per_kg')}</th>
+            <th className="bom-history__num bom-history__num-col bom-history__th--sortable" onClick={() => handleSort('total_cost')}>{t.totalCost}{sortArrow('total_cost')}</th>
+            {type === 'final' && (
               <>
-                <th className="bom-history__num bom-history__num-col">{t.totalCost}</th>
-                <th className="bom-history__num bom-history__num-col">{t.tkpPrice}</th>
-                <th className="bom-history__num bom-history__num-col">{t.sellingPrice}</th>
+                <th className="bom-history__num bom-history__num-col bom-history__th--sortable" onClick={() => handleSort('wholesale_for_yield')}>{t.tkpPrice}{sortArrow('wholesale_for_yield')}</th>
+                <th className="bom-history__num bom-history__num-col bom-history__th--sortable" onClick={() => handleSort('retail_for_yield')}>{t.sellingPrice}{sortArrow('retail_for_yield')}</th>
               </>
             )}
-            <th className="bom-history__num bom-history__num-col">{t.linesHeader}</th>
-            <th className="bom-history__num bom-history__num-col">{t.ver}</th>
-            <th className="bom-history__date-col">{t.lastUpdated}</th>
+            <th className="bom-history__num bom-history__num-col bom-history__th--sortable" onClick={() => handleSort('line_count')}>{t.linesHeader}{sortArrow('line_count')}</th>
+            <th className="bom-history__num bom-history__num-col bom-history__th--sortable" onClick={() => handleSort('version')}>{t.ver}{sortArrow('version')}</th>
+            <th className="bom-history__date-col bom-history__th--sortable" onClick={() => handleSort('updated_at')}>{t.lastUpdated}{sortArrow('updated_at')}</th>
             <th className="bom-history__actions-col">{t.actions}</th>
           </tr>
         </thead>
         <tbody>
-          {filteredBoms.map((b) => (
+          {sortedBoms.map((b) => (
             <React.Fragment key={b.id}>
-              <tr className={exportMode && selectedIds.has(b.item_id) ? 'bom-history__row--selected' : undefined}>
-                {exportMode && (
+              <tr className={showCheckboxes && selectedIds.has(b.item_id) ? 'bom-history__row--selected' : undefined}>
+                {showCheckboxes && (
                   <td className="bom-history__select-col">
                     <input
                       type="checkbox"
@@ -526,13 +804,12 @@ export const BomHistory: React.FC<{ type: RecipeType }> = ({ type }) => {
                 </td>
                 <td className="bom-history__ref">{b.reference_code ?? ''}</td>
                 <td className="bom-history__num">{fmt(b.yield_kg)}</td>
-                {type === 'base' ? (
-                  <td className="bom-history__num">{fmt(b.cost_per_kg)}</td>
-                ) : (
+                <td className="bom-history__num bom-history__num--price">{b.cost_per_kg != null ? `${CURRENCY_SYMBOL}${fmt(b.cost_per_kg)}` : '—'}</td>
+                <td className="bom-history__num bom-history__num--price">{b.total_cost != null ? `${CURRENCY_SYMBOL}${fmt(b.total_cost)}` : '—'}</td>
+                {type === 'final' && (
                   <>
-                    <td className="bom-history__num bom-history__num--price">{b.total_cost != null ? `₪${fmt(b.total_cost)}` : '—'}</td>
-                    <td className="bom-history__num bom-history__num--price">{b.wholesale_for_yield != null ? `₪${fmt(b.wholesale_for_yield)}` : '—'}</td>
-                    <td className="bom-history__num bom-history__num--price">{b.retail_for_yield != null ? `₪${fmt(b.retail_for_yield)}` : '—'}</td>
+                    <td className="bom-history__num bom-history__num--price">{b.wholesale_for_yield != null ? `${CURRENCY_SYMBOL}${fmt(b.wholesale_for_yield)}` : '—'}</td>
+                    <td className="bom-history__num bom-history__num--price">{b.retail_for_yield != null ? `${CURRENCY_SYMBOL}${fmt(b.retail_for_yield)}` : '—'}</td>
                   </>
                 )}
                 <td className="bom-history__num">{b.line_count}</td>
@@ -547,6 +824,16 @@ export const BomHistory: React.FC<{ type: RecipeType }> = ({ type }) => {
                 </td>
                 <td className="bom-history__date">{fmtDate(b.updated_at)}</td>
                 <td className="bom-history__actions">
+                  {showArchived && (
+                    <button
+                      className="bom-history__btn bom-history__btn--restore"
+                      onClick={() => restoreItems([b.item_id])}
+                      disabled={bulkBusy}
+                      title={t.restore}
+                    >
+                      ♻ {t.restore}
+                    </button>
+                  )}
                   <button
                     className="bom-history__btn bom-history__btn--edit"
                     onClick={() => handleEdit(b)}
@@ -590,7 +877,7 @@ export const BomHistory: React.FC<{ type: RecipeType }> = ({ type }) => {
               </tr>
               {snapshotItemId === b.item_id && (
                 <tr className="bom-history__snapshot-row">
-                  <td colSpan={(type === 'base' ? 8 : 10) + (exportMode ? 1 : 0)}>
+                  <td colSpan={(type === 'final' ? 11 : 9) + (showCheckboxes ? 1 : 0)}>
                     <SnapshotPanel itemId={b.item_id} onClose={() => setSnapshotItemId(null)} />
                   </td>
                 </tr>
@@ -624,6 +911,7 @@ interface RecipeIOToolbarProps {
   exportMode:          boolean;
   onOpenExportMode:    () => void;
   onCancelExportMode:  () => void;
+  extraAction?:        React.ReactNode;
 }
 
 const RecipeIOToolbar: React.FC<RecipeIOToolbarProps> = ({
@@ -633,6 +921,7 @@ const RecipeIOToolbar: React.FC<RecipeIOToolbarProps> = ({
   onClearFilters, filtersActive,
   onOpenImport, onExport, exporting,
   exportMode, onOpenExportMode, onCancelExportMode,
+  extraAction = null,
 }) => {
   const { t } = useLang();
   const exportLabel = exportMode
@@ -713,6 +1002,7 @@ const RecipeIOToolbar: React.FC<RecipeIOToolbarProps> = ({
           </svg>
           <span>{t.rioImportBtn}</span>
         </button>
+        {extraAction}
       </div>
     </div>
   );
@@ -721,7 +1011,7 @@ const RecipeIOToolbar: React.FC<RecipeIOToolbarProps> = ({
 /* ── Settings Page ──────────────────────────────────────────── */
 export const SettingsPage: React.FC = () => {
   const { t } = useLang();
-  const [tab, setTab] = useState<'formulas' | 'users' | 'sync'>('formulas');
+  const [tab, setTab] = useState<'formulas' | 'users' | 'sync' | 'refcodes'>('formulas');
 
   return (
     <div className="settings-page">
@@ -750,12 +1040,21 @@ export const SettingsPage: React.FC = () => {
         >
           {t.settingsTabSync}
         </button>
+        <button
+          role="tab"
+          aria-selected={tab === 'refcodes'}
+          className={`settings-page__tab ${tab === 'refcodes' ? 'settings-page__tab--active' : ''}`}
+          onClick={() => setTab('refcodes')}
+        >
+          {t.settingsTabRefCodes}
+        </button>
       </div>
 
       <div className="settings-page__body">
         {tab === 'formulas' && <FormulaManager />}
         {tab === 'users'    && <UserManagementPanel />}
         {tab === 'sync'     && <OdooSyncPanel />}
+        {tab === 'refcodes' && <ReferenceCodesPanel />}
       </div>
     </div>
   );
@@ -770,11 +1069,13 @@ const AppInner: React.FC = () => {
   // Nav items are tagged with `adminOnly` so the renderer below can
   // hide admin entries for customer accounts.  The client-side gate
   // is cosmetic — server enforcement (STEP 2) is the real policy.
-  const isAdmin = user?.role === 'admin';
+  // 'manager' is a privileged superset of admin → sees all admin nav.
+  const isManager = user?.role === 'manager';
+  const isAdmin = user?.role === 'admin' || isManager;
 
-  const NAV_ITEMS: Array<{ to: string; label: string; end: boolean; icon: React.ReactNode; adminOnly?: boolean }> = [
+  const NAV_ITEMS: Array<{ to: string; label: string; end: boolean; icon: React.ReactNode; adminOnly?: boolean; managerOnly?: boolean }> = [
     {
-      to: '/dashboard', label: t.dashboard, end: true, adminOnly: true,
+      to: '/dashboard', label: t.dashboard, end: true, managerOnly: true,
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect x="3" y="3" width="7" height="9"/>
@@ -794,27 +1095,7 @@ const AppInner: React.FC = () => {
       ),
     },
     {
-      to: '/recipes/base', label: t.baseRecipes, end: true, adminOnly: true,
-      icon: (
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <polygon points="12 2 2 7 12 12 22 7 12 2"/>
-          <polyline points="2 17 12 22 22 17"/>
-          <polyline points="2 12 12 17 22 12"/>
-        </svg>
-      ),
-    },
-    {
-      to: '/recipes/final', label: t.finalProducts, end: true, adminOnly: true,
-      icon: (
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-          <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
-          <line x1="12" y1="22.08" x2="12" y2="12"/>
-        </svg>
-      ),
-    },
-    {
-      to: '/recipe/new', label: t.recipeBuilder, end: false, adminOnly: true,
+      to: '/kitchen', label: t.kitchenRecipes, end: false, managerOnly: true,
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -823,7 +1104,25 @@ const AppInner: React.FC = () => {
       ),
     },
     {
-      to: '/where-used', label: t.whereUsed, end: true, adminOnly: true,
+      to: '/test-kitchen', label: t.testRecipes, end: false, adminOnly: true,
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M9 3h6v2l-1 1v4l4 8a2 2 0 0 1-2 3H8a2 2 0 0 1-2-3l4-8V6L9 5z"/>
+          <line x1="7" y1="16" x2="17" y2="16"/>
+        </svg>
+      ),
+    },
+    {
+      to: '/pending-recipes', label: t.pendingApproval, end: false, managerOnly: true,
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"/>
+          <polyline points="12 7 12 12 15 14"/>
+        </svg>
+      ),
+    },
+    {
+      to: '/where-used', label: t.whereUsed, end: true, managerOnly: true,
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <circle cx="18" cy="5" r="3"/>
@@ -845,7 +1144,7 @@ const AppInner: React.FC = () => {
       ),
     },
     {
-      to: '/settings', label: t.settings, end: true, adminOnly: true,
+      to: '/settings', label: t.settings, end: true, managerOnly: true,
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
@@ -858,7 +1157,7 @@ const AppInner: React.FC = () => {
       ),
     },
     {
-      to: '/logs', label: t.logs, end: true, adminOnly: true,
+      to: '/logs', label: t.logs, end: true, managerOnly: true,
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -869,7 +1168,7 @@ const AppInner: React.FC = () => {
         </svg>
       ),
     },
-  ].filter((item) => !item.adminOnly || isAdmin);
+  ].filter((item) => (item.managerOnly ? isManager : (!item.adminOnly || isAdmin)));
 
   return (
     <div className="app">

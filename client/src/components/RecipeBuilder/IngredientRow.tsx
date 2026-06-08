@@ -13,6 +13,9 @@ interface Props {
   costPct?: number;
   /** Highlight this row's inputs when validation fails */
   hasError?: boolean;
+  /** Test recipes only: allow committing a free-text product that is not
+   *  in the catalogue (shown red until it exists + a sync resolves it). */
+  allowAdhoc?: boolean;
 }
 
 // ─── UOM helpers ────────────────────────────────────────────────────────────
@@ -91,14 +94,18 @@ interface DropdownPos { top: number; left: number; width: number }
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export const IngredientRow: React.FC<Props> = React.memo(({ line, onUpdate, onRemove, costPct = 0, hasError = false }) => {
+export const IngredientRow: React.FC<Props> = React.memo(({ line, onUpdate, onRemove, costPct = 0, hasError = false, allowAdhoc = false }) => {
   const { results, isFetching, onSearch } = useIngredientSearch();
   const { lang, t } = useLang();
   const [inputValue, setInputValue] = useState(
-    line.item ? getDisplayName(line.item, lang) : ''
+    line.item ? getDisplayName(line.item, lang) : (line.adhocName ?? '')
   );
   const [open, setOpen] = useState(false);
   const push = useModalStore((s) => s.push);
+
+  // An ad-hoc line is a free-text product not in the catalogue → red.
+  const isAdhoc = !line.item && !!line.adhocName;
+  const isFilled = !!line.item || !!line.adhocName;
 
   const wrapperRef  = useRef<HTMLDivElement>(null);
   const inputRef    = useRef<HTMLInputElement>(null);
@@ -107,7 +114,8 @@ export const IngredientRow: React.FC<Props> = React.memo(({ line, onUpdate, onRe
 
   useEffect(() => {
     if (line.item) setInputValue(getDisplayName(line.item, lang));
-  }, [lang, line.item]);
+    else if (line.adhocName != null) setInputValue(line.adhocName);
+  }, [lang, line.item, line.adhocName]);
 
   // Close on outside click
   useEffect(() => {
@@ -143,9 +151,14 @@ export const IngredientRow: React.FC<Props> = React.memo(({ line, onUpdate, onRe
       setInputValue(val);
       onSearch(val);
       openDropdown();
-      if (!val) onUpdate({ item: null });
+      if (!val) {
+        onUpdate({ item: null, adhocName: undefined, adhocReference: undefined, isRed: undefined });
+      } else if (!line.item && line.adhocName != null) {
+        // Live-edit the name of an existing ad-hoc line as the user types.
+        onUpdate({ adhocName: val });
+      }
     },
-    [onSearch, onUpdate, openDropdown]
+    [onSearch, onUpdate, openDropdown, line.item, line.adhocName]
   );
 
   const handleSelect = useCallback(
@@ -155,6 +168,9 @@ export const IngredientRow: React.FC<Props> = React.memo(({ line, onUpdate, onRe
       const factor = toKgFactor(defaultUom, result.volume_weight);
       onUpdate({
         item: result,
+        adhocName: undefined,
+        adhocReference: undefined,
+        isRed: false,
         line_uom: defaultUom,
         // recalculate quantity_kg with the new item's conversion factor
         quantity_kg: line.quantity_input * factor,
@@ -162,6 +178,18 @@ export const IngredientRow: React.FC<Props> = React.memo(({ line, onUpdate, onRe
       setOpen(false);
     },
     [onUpdate, lang, line.quantity_input]
+  );
+
+  // Commit the typed text as an ad-hoc (not-in-catalogue) ingredient.
+  const handleCommitAdhoc = useCallback(
+    (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      setInputValue(trimmed);
+      onUpdate({ item: null, adhocName: trimmed, isRed: true });
+      setOpen(false);
+    },
+    [onUpdate]
   );
 
   // ── Quantity input handler ───────────────────────────────────────────────
@@ -219,9 +247,22 @@ export const IngredientRow: React.FC<Props> = React.memo(({ line, onUpdate, onRe
           {t.searching}
         </li>
       )}
-      {!isFetching && results.length === 0 && (
+      {!isFetching && results.length === 0 && !allowAdhoc && (
         <li className="ingredient-row__dropdown-item ingredient-row__dropdown-item--empty">
           {t.noResults}
+        </li>
+      )}
+      {/* Test recipes: offer to add the typed text as a new (red) product */}
+      {allowAdhoc && inputValue.trim().length >= 1 && (
+        <li
+          role="option"
+          className="ingredient-row__dropdown-item ingredient-row__dropdown-item--adhoc"
+          onMouseDown={() => handleCommitAdhoc(inputValue)}
+        >
+          <span className="ingredient-row__badge ingredient-row__badge--adhoc">+</span>
+          <span className="ingredient-row__item-name">
+            {t.addNewProductRed.replace('{name}', inputValue.trim())}
+          </span>
         </li>
       )}
       {results.map((r) => (
@@ -258,8 +299,10 @@ export const IngredientRow: React.FC<Props> = React.memo(({ line, onUpdate, onRe
     document.body
   ) : null;
 
+  const isRedRow = isAdhoc || line.isRed === true;
+
   return (
-    <tr className="ingredient-table__row">
+    <tr className={`ingredient-table__row${isRedRow ? ' ingredient-table__row--adhoc' : ''}`}>
 
       {/* ── Thumbnail ──────────────────────────────────────────── */}
       <td className="ingredient-table__td ingredient-table__td--thumb">
@@ -291,7 +334,7 @@ export const IngredientRow: React.FC<Props> = React.memo(({ line, onUpdate, onRe
         <div className="ingredient-row__search" ref={wrapperRef}>
           <input
             ref={inputRef}
-            className={`ingredient-row__input${hasError && !line.item ? ' ingredient-row__input--error' : ''}`}
+            className={`ingredient-row__input${hasError && !isFilled ? ' ingredient-row__input--error' : ''}${isRedRow ? ' ingredient-row__input--adhoc' : ''}`}
             value={inputValue}
             onChange={handleInputChange}
             onFocus={() => inputValue.length >= 2 && openDropdown()}
@@ -299,7 +342,7 @@ export const IngredientRow: React.FC<Props> = React.memo(({ line, onUpdate, onRe
             aria-autocomplete="list"
             aria-expanded={open}
             aria-haspopup="listbox"
-            aria-invalid={hasError && !line.item}
+            aria-invalid={hasError && !isFilled}
           />
         </div>
         {dropdown}
@@ -307,9 +350,19 @@ export const IngredientRow: React.FC<Props> = React.memo(({ line, onUpdate, onRe
 
       {/* ── Reference code ───────────────────────────────────────── */}
       <td className="ingredient-table__td ingredient-table__td--ref">
-        <span className="ingredient-table__ref-code">
-          {line.item?.reference ?? ''}
-        </span>
+        {isAdhoc ? (
+          <input
+            className="ingredient-row__input ingredient-row__ref-input"
+            value={line.adhocReference ?? ''}
+            onChange={(e) => onUpdate({ adhocReference: e.target.value })}
+            placeholder={t.adhocRefPlaceholder}
+            title={t.adhocRefPlaceholder}
+          />
+        ) : (
+          <span className="ingredient-table__ref-code">
+            {line.item?.reference ?? ''}
+          </span>
+        )}
       </td>
 
       {/* ── Quantity + UOM selector ──────────────────────────────── */}

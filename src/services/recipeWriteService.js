@@ -49,6 +49,7 @@ async function saveRecipeBom(client, payload, userId) {
     servings_count = null,
     total_weight = null,
     pricing_formula_id = null,
+    steps = null,
   } = payload;
 
   const safeRecipeType = recipe_type === 'final' ? 'final' : 'base';
@@ -182,12 +183,16 @@ async function saveRecipeBom(client, payload, userId) {
     const effectiveQty = parseFloat(line.quantity_kg) / Math.max(1 - wastePct / 100, 0.001);
     const lineCost     = snapshotPpk != null ? effectiveQty * snapshotPpk : null;
 
+    const stepNumber = Number.isFinite(parseInt(line.step_number, 10))
+      ? parseInt(line.step_number, 10)
+      : null;
+
     await client.query(
       `INSERT INTO bom_lines
          (bom_id, ingredient_item_id, ingredient_type,
           quantity_kg, line_uom, waste_pct,
-          price_per_kg_snapshot, line_cost)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          price_per_kg_snapshot, line_cost, step_number)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         bom.id,
         line.ingredient_item_id,
@@ -197,8 +202,26 @@ async function saveRecipeBom(client, payload, userId) {
         wastePct,
         snapshotPpk,
         lineCost,
+        stepNumber,
       ]
     );
+  }
+
+  // ── Preparation steps (name + process description per step) ──
+  // Replace all step metadata for this BOM.  bom_lines.step_number above
+  // links each ingredient to its step; this table holds the step's
+  // name + description.  Recipes saved without steps simply clear it.
+  await client.query(`DELETE FROM bom_steps WHERE bom_id = $1`, [bom.id]);
+  if (Array.isArray(steps)) {
+    for (const step of steps) {
+      const n = parseInt(step.step_number, 10);
+      if (!Number.isFinite(n)) continue;
+      await client.query(
+        `INSERT INTO bom_steps (bom_id, step_number, step_name, description)
+         VALUES ($1, $2, $3, $4)`,
+        [bom.id, n, step.step_name || null, step.description || null]
+      );
+    }
   }
 
   // Calculate and persist recipe cost — throws on circular dependency

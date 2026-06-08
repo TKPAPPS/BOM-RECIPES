@@ -1,4 +1,4 @@
-import type { SearchResult, PricingFormula, BomDetail, BomSummary, Category, BomSnapshot, AffectedRecipesResult, RecipeType, CalcResult, UserRow, AuditLogPage, SyncStatus, DashboardSummary, ProductRow, RecipeImportReport, RecipeExportFilters } from '../types';
+import type { SearchResult, PricingFormula, BomDetail, BomSummary, Category, BomSnapshot, AffectedRecipesResult, RecipeType, CalcResult, UserRow, AuditLogPage, SyncStatus, DashboardSummary, ProductRow, ProductOverride, RecipeImportReport, RecipeExportFilters, TestRecipeSummary, TestRecipeDetail, TestRecipeDraft, ReferenceCodeCategory } from '../types';
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api';
 
@@ -65,8 +65,13 @@ export const api = {
   getBom: (itemId: number) =>
     get<BomDetail>(`/boms/${itemId}`),
 
-  getBoms: (type?: RecipeType) =>
-    get<BomSummary[]>(type ? `/boms?type=${type}` : '/boms'),
+  getBoms: (type?: RecipeType, opts?: { archived?: boolean }) => {
+    const params = new URLSearchParams();
+    if (type) params.set('type', type);
+    if (opts?.archived) params.set('archived', 'true');
+    const qs = params.toString();
+    return get<BomSummary[]>(qs ? `/boms?${qs}` : '/boms');
+  },
 
   /**
    * Live-resolved pricing for an item (walks manual → default →
@@ -138,11 +143,72 @@ export const api = {
       quantity_kg: number;
       line_uom: string;
       waste_pct: number;
+      step_number?: number | null;
+    }[];
+    // Kitchen Recipes: preparation step metadata (name + process text).
+    steps?: {
+      step_number: number;
+      step_name: string | null;
+      description: string | null;
     }[];
   }) => post<{ bom_id: number; item_id: number; message: string }>('/boms', payload),
 
   deleteBom: (id: number) =>
     del<{ message: string }>(`/boms/${id}`),
+
+  /** Bulk permanently delete recipes by their item ids.
+   *  `blocked` lists ids that couldn't be deleted (still used as a sub-recipe). */
+  bulkDeleteBoms: (itemIds: number[]) =>
+    post<{ message: string; count: number; blocked: number[] }>('/boms/bulk-delete', { itemIds }),
+
+  /** Bulk archive (or unarchive) recipes by their item ids. */
+  bulkArchiveBoms: (itemIds: number[], archived = true) =>
+    post<{ message: string; count: number }>('/boms/bulk-archive', { itemIds, archived }),
+
+  // ─── Test recipes (sandbox) ──────────────────────────────────────
+  getTestRecipes: (status?: 'draft' | 'pending') =>
+    get<TestRecipeSummary[]>(`/test-recipes${status ? `?status=${status}` : ''}`),
+
+  /** Submit a draft test recipe for the manager's approval. */
+  submitTestRecipe: (id: number) =>
+    post<{ id: number; message: string }>(`/test-recipes/${id}/submit`, {}),
+
+  /** Manager-only: send a pending recipe back to the author for re-editing. */
+  sendBackTestRecipe: (id: number, note: string) =>
+    post<{ id: number; message: string }>(`/test-recipes/${id}/send-back`, { note }),
+
+  // ─── Reference-code categories ───────────────────────────────────
+  getReferenceCategories: () =>
+    get<ReferenceCodeCategory[]>('/reference-codes'),
+
+  getNextReferenceCode: (prefix: string) =>
+    get<{ prefix: string; n: number; code: string }>(`/reference-codes/next?prefix=${encodeURIComponent(prefix)}`),
+
+  createReferenceCategory: (body: { prefix: string; description?: string }) =>
+    post<ReferenceCodeCategory>('/reference-codes', body),
+
+  deleteReferenceCategory: (id: number) =>
+    del<{ message: string }>(`/reference-codes/${id}`),
+
+  getTestRecipe: (id: number) =>
+    get<TestRecipeDetail>(`/test-recipes/${id}`),
+
+  saveTestRecipe: (payload: {
+    id?: number | null;
+    name: string;
+    reference_code: string | null;
+    recipe_type: RecipeType;
+    draft: TestRecipeDraft;
+  }) => post<{ id: number; message: string }>('/test-recipes', payload),
+
+  deleteTestRecipe: (id: number) =>
+    del<{ message: string }>(`/test-recipes/${id}`),
+
+  /** Manager-only: push a finished test recipe into the real lists. */
+  promoteTestRecipe: (id: number) =>
+    post<{ item_id: number; recipe_type: RecipeType; message: string }>(
+      `/test-recipes/${id}/promote`, {},
+    ),
 
   deleteFormula: (id: number) =>
     del<{ message: string }>(`/pricing/${id}`),
@@ -188,10 +254,19 @@ export const api = {
   },
 
   updateUser: (id: number, patchBody: {
-    role?: 'admin' | 'customer';
+    role?: 'admin' | 'customer' | 'manager';
     can_view_prices?: boolean | null;
     is_active?: boolean;
   }) => patch<UserRow>(`/users/${id}`, patchBody),
+
+  /** Create a local user that logs in with username + password. */
+  createUser: (body: {
+    username: string;
+    password: string;
+    name?: string;
+    role?: 'admin' | 'customer' | 'manager';
+    can_view_prices?: boolean | null;
+  }) => post<UserRow>('/users', body),
 
   getAuditLogs: (params: {
     user_id?: number;
@@ -218,8 +293,12 @@ export const api = {
     get<string[]>('/audit-logs/action-types'),
 
   // ─── Admin: Products (raw Odoo catalogue) ────────────────────────
-  getProducts: () =>
-    get<ProductRow[]>('/products'),
+  getProducts: (includeArchived = false) =>
+    get<ProductRow[]>(`/products${includeArchived ? '?includeArchived=true' : ''}`),
+
+  /** Manually override cost price / weight (kg) / cost-per-kg for a product. */
+  updateProduct: (id: number, body: ProductOverride) =>
+    patch<ProductRow>(`/products/${id}`, body),
 
   // ─── Admin: Recipe Import / Export ──────────────────────────────
   /**
@@ -269,10 +348,19 @@ export const api = {
     });
     if (res.status === 401) handleUnauthorized();
     if (!res.ok) {
-      // Server returns { error: '…' } for parse / structural failures
+      // Server returns { error: '…' } for parse / structural failures.
+      // The reference-code collision guard returns 409 { error:'codes_exist',
+      // message, conflicts:[…] } — surface those so the modal can list them.
       const text = await res.text();
-      try { throw new Error(JSON.parse(text).error || text); }
-      catch { throw new Error(text); }
+      let parsed: { error?: string; message?: string; conflicts?: string[] } | null = null;
+      try { parsed = JSON.parse(text); } catch { /* not JSON */ }
+      if (parsed?.error === 'codes_exist') {
+        const err = new Error(parsed.message || 'codes_exist') as Error & { code?: string; conflicts?: string[] };
+        err.code = 'codes_exist';
+        err.conflicts = parsed.conflicts || [];
+        throw err;
+      }
+      throw new Error(parsed?.error || text);
     }
     return res.json();
   },

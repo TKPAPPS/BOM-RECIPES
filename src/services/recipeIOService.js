@@ -93,10 +93,15 @@ function normHeader(s) {
 // file exported from this system OR hand-built from the sample both
 // import cleanly.
 const HEADER_ALIASES = {
-  // image
+  // image — accept many phrasings so a hand-built file still matches
   imageurl: 'image_url', image: 'image_url', img: 'image_url',
-  picture: 'image_url', photo: 'image_url',
-  תמונה: 'image_url', קישורתמונה: 'image_url',
+  picture: 'image_url', photo: 'image_url', pic: 'image_url',
+  imagelink: 'image_url', imglink: 'image_url', imageaddress: 'image_url',
+  photourl: 'image_url', pictureurl: 'image_url', recipeimage: 'image_url',
+  url: 'image_url', link: 'image_url',
+  תמונה: 'image_url', קישורתמונה: 'image_url', תמונהקישור: 'image_url',
+  קישורלתמונה: 'image_url', כתובתתמונה: 'image_url',
+  לינק: 'image_url', לינקתמונה: 'image_url', קישור: 'image_url',
   // recipe name
   recipename: 'name', name: 'name', recipe: 'name',
   שםמתכון: 'name', שם: 'name',
@@ -174,6 +179,25 @@ function cellText(v) {
   if (typeof v === 'object') {
     if ('text' in v && v.text != null) return String(v.text).trim();
     if ('hyperlink' in v && v.hyperlink) return String(v.hyperlink).trim();
+    if ('result' in v && v.result != null) return String(v.result).trim();
+    if ('richText' in v && Array.isArray(v.richText))
+      return v.richText.map((r) => r.text).join('').trim();
+  }
+  return String(v).trim();
+}
+
+/**
+ * Read an image-URL cell, PREFERRING the hyperlink target.  When a user
+ * pastes a link Excel commonly turns the cell into a hyperlink whose
+ * display text may differ from (or truncate) the real URL — so for the
+ * image column we want the hyperlink target first, falling back to the
+ * visible text / rich text.
+ */
+function cellImageUrl(v) {
+  if (v == null) return '';
+  if (typeof v === 'object') {
+    if ('hyperlink' in v && v.hyperlink) return String(v.hyperlink).trim();
+    if ('text' in v && v.text != null) return String(v.text).trim();
     if ('result' in v && v.result != null) return String(v.result).trim();
     if ('richText' in v && Array.isArray(v.richText))
       return v.richText.map((r) => r.text).join('').trim();
@@ -340,7 +364,7 @@ async function parseRecipeWorkbook(buffer) {
       // Validate the image-URL cell; bad values become warnings on the
       // recipe draft (the route surfaces them in the import report)
       // rather than silently producing a broken image in the UI.
-      const { url: validatedUrl, warning: imageWarning } = classifyImageUrl(cellText(read(row, 'image_url')));
+      const { url: validatedUrl, warning: imageWarning } = classifyImageUrl(cellImageUrl(read(row, 'image_url')));
       const warnings = [];
       if (imageWarning) warnings.push(imageWarning);
 

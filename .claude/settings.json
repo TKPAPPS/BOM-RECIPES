@@ -9,7 +9,14 @@
       "PowerShell(git config user.name)",
       "PowerShell(git config user.email)",
       "PowerShell(git init -b main)",
-      "PowerShell(git add .)"
+      "PowerShell(git add .)",
+      "PowerShell(git commit -m \"Initial commit: BOM system\" --quiet)",
+      "PowerShell(git remote add origin https://github.com/talyaalon/BOM-SYSTEM.git)",
+      "PowerShell(git push -u origin main 2>&1)",
+      "PowerShell(git fetch origin 2>&1)",
+      "PowerShell(git ls-tree -r origin/main --name-only)",
+      "PowerShell(git pull origin main --allow-unrelated-histories --no-rebase --no-edit 2>&1)",
+      "PowerShell(\"---\")"
     ]
   }
 }
