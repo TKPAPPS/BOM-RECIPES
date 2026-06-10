@@ -129,10 +129,17 @@ export const IngredientRow: React.FC<Props> = React.memo(({ line, onUpdate, onRe
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Close on any scroll
+  // Close when the PAGE scrolls (the dropdown is fixed-positioned from a
+  // snapshot of the input's rect, so it would otherwise detach).  BUT do
+  // NOT close when the scroll happens INSIDE the dropdown's own list —
+  // that's the user browsing results.
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
+    const close = (e: Event) => {
+      const tgt = e.target as Node | null;
+      if (tgt && dropdownRef.current && dropdownRef.current.contains(tgt)) return;
+      setOpen(false);
+    };
     window.addEventListener('scroll', close, { capture: true, passive: true });
     return () => window.removeEventListener('scroll', close, true);
   }, [open]);

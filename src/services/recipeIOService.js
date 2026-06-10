@@ -254,7 +254,15 @@ async function parseRecipeWorkbook(buffer) {
   try {
     await wb.xlsx.load(buffer);
   } catch (e) {
-    return { recipes: [], fatalError: 'The file could not be read as a valid .xlsx workbook.' };
+    const raw = (e && e.message) ? String(e.message) : 'unknown error';
+    console.error('[recipeIO] xlsx load failed:', raw, '\n', e && e.stack ? e.stack.split('\n').slice(0, 4).join('\n') : '');
+    // Common, actionable cause: an old .xls (binary) or a CSV renamed to
+    // .xlsx — neither is a real .xlsx (zip) package.
+    const looksNotZip = /end of central directory|zip|central directory|invalid signature|Begin|not.*xlsx/i.test(raw);
+    const hint = looksNotZip
+      ? ' It may be an old .xls file, a CSV renamed to .xlsx, or saved as "Strict Open XML". Open it in Excel and re-save with: File → Save As → "Excel Workbook (.xlsx)".'
+      : '';
+    return { recipes: [], fatalError: `The file could not be read as a valid .xlsx workbook.${hint} (technical: ${raw})` };
   }
 
   if (!wb.worksheets.length) {

@@ -96,9 +96,20 @@ async function saveRecipeBom(client, payload, userId) {
       [name.trim(), itemId]
     );
   } else {
+    // Find-or-create by name, SCOPED to the same recipe_type.  This lets a
+    // final product share a name (and code) with its base recipe without
+    // overwriting it — a final "X" matches an existing final "X" only, never
+    // the base "X".  Falls back to a plain name match for recipe items that
+    // have no active BOM yet (legacy rows).
     const existing = await client.query(
-      `SELECT id FROM items WHERE LOWER(name) = LOWER($1) AND item_type = 'recipe' LIMIT 1`,
-      [name.trim()]
+      `SELECT i.id
+       FROM   items i
+       JOIN   boms b ON b.item_id = i.id AND b.is_active = TRUE
+       WHERE  LOWER(i.name) = LOWER($1)
+         AND  i.item_type = 'recipe'
+         AND  b.recipe_type = $2
+       LIMIT 1`,
+      [name.trim(), safeRecipeType]
     );
     if (existing.rows.length) {
       itemId = existing.rows[0].id;

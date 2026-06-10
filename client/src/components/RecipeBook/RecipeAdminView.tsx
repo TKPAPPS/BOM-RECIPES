@@ -49,6 +49,15 @@ export const RecipeAdminView: React.FC = () => {
       return next;
     });
 
+  // Desired production quantity (kg).  Empty/invalid → show the recipe's
+  // own yield (scale ×1).  Scaling multiplies every ingredient quantity
+  // (and nested base-recipe quantities) by desired ÷ yield.
+  const [produceKg, setProduceKg] = useState('');
+  // Tracks which base sub-recipes actually have preparation steps, so we
+  // never render an empty sub-recipe row and can show a single "no steps"
+  // line when nothing (recipe or any sub-recipe) has prep info.
+  const [subStepsInfo, setSubStepsInfo] = useState<Record<number, boolean>>({});
+
   const { data: recipe, isLoading, isError, error } = useQuery({
     queryKey: ['bom-detail', id],
     queryFn: () => api.getBom(id),
@@ -377,9 +386,29 @@ export const RecipeAdminView: React.FC = () => {
         const showRef    = detail.lines.some((l) => !!l.reference);
         const showCostKg = detail.lines.some((l) => has(l.cost_per_kg));
         const showLine   = detail.lines.some((l) => has(l.line_cost));
+        const baseYield  = toNum(detail.yield_kg) || 0;
+        const desired    = parseFloat(produceKg);
+        const scale      = baseYield > 0 && Number.isFinite(desired) && desired > 0 ? desired / baseYield : 1;
         return (
           <section className="recipe-view__section">
-            <h2 className="recipe-view__section-title">{t.rbIngredientsHeader}</h2>
+            <div className="recipe-view__section-head">
+              <h2 className="recipe-view__section-title">{t.rbIngredientsHeader}</h2>
+              <div className="recipe-view__scale">
+                <span className="recipe-view__scale-label">{t.calcDesiredWeight}</span>
+                <input
+                  className="recipe-view__scale-input"
+                  type="number" min={0} step="any"
+                  value={produceKg}
+                  placeholder={baseYield ? fmtQty(baseYield) : ''}
+                  onChange={(e) => setProduceKg(e.target.value)}
+                />
+                <span className="recipe-view__scale-unit">kg</span>
+                {scale !== 1 && <span className="recipe-view__scale-factor">×{fmtQty(scale, 4)}</span>}
+                {produceKg !== '' && (
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => setProduceKg('')}>{t.clear}</button>
+                )}
+              </div>
+            </div>
             <div className="recipe-view__table-wrap">
               <table className="recipe-view__table">
                 <thead>
@@ -396,6 +425,8 @@ export const RecipeAdminView: React.FC = () => {
                     const isRecipe = l.item_type === 'recipe';
                     const isOpen = expanded.has(l.line_id);
                     const colCount = 1 + (showRef ? 1 : 0) + 1 + (showCostKg ? 1 : 0) + (showLine ? 1 : 0);
+                    const qty      = has(l.quantity_kg) ? (toNum(l.quantity_kg) || 0) * scale : null;
+                    const lineCost = has(l.line_cost)   ? (toNum(l.line_cost)   || 0) * scale : null;
                     return (
                       <React.Fragment key={l.line_id}>
                         <tr>
@@ -409,7 +440,17 @@ export const RecipeAdminView: React.FC = () => {
                                 </span>
                               )}
                               <div className="recipe-view__ing-text">
-                                <span className="recipe-view__ing-name">{l.ingredient}</span>
+                                {isRecipe ? (
+                                  <Link
+                                    to={`/recipes/view/${l.ingredient_id}`}
+                                    className="recipe-view__ing-name recipe-view__ing-name--link"
+                                    title={t.openBaseRecipe}
+                                  >
+                                    {l.ingredient}
+                                  </Link>
+                                ) : (
+                                  <span className="recipe-view__ing-name">{l.ingredient}</span>
+                                )}
                                 {isRecipe && (
                                   <button
                                     type="button"
@@ -426,14 +467,14 @@ export const RecipeAdminView: React.FC = () => {
                             </div>
                           </td>
                           {showRef    && <td className="recipe-view__ref">{l.reference || ''}</td>}
-                          <td className="recipe-view__num">{has(l.quantity_kg) ? `${fmtQty(l.quantity_kg)} kg` : ''}</td>
+                          <td className="recipe-view__num">{qty != null ? `${fmtQty(qty)} kg` : ''}</td>
                           {showCostKg && <td className="recipe-view__num">{has(l.cost_per_kg) ? money(l.cost_per_kg) : ''}</td>}
-                          {showLine   && <td className="recipe-view__num recipe-view__num--price">{has(l.line_cost) ? money(l.line_cost) : ''}</td>}
+                          {showLine   && <td className="recipe-view__num recipe-view__num--price">{lineCost != null ? money(lineCost) : ''}</td>}
                         </tr>
                         {isRecipe && isOpen && (
                           <tr className="rb-subrecipe-row">
                             <td colSpan={colCount}>
-                              <SubRecipeExpansion itemId={l.ingredient_id} quantityKg={l.quantity_kg} />
+                              <SubRecipeExpansion itemId={l.ingredient_id} quantityKg={(toNum(l.quantity_kg) || 0) * scale} />
                             </td>
                           </tr>
                         )}
@@ -446,6 +487,101 @@ export const RecipeAdminView: React.FC = () => {
           </section>
         );
       })()}
+
+      {/* ── Preparation steps (recipe's own + each base sub-recipe's) ── */}
+      {(() => {
+        const ownSteps = detail.steps ?? [];
+        const subLines = detail.lines.filter((l) => l.item_type === 'recipe');
+        if (ownSteps.length === 0 && subLines.length === 0) return null;
+        const anySubHasSteps = subLines.some((l) => subStepsInfo[l.ingredient_id]);
+        return (
+          <section className="recipe-view__section">
+            <h2 className="recipe-view__section-title">{t.prepStepsSection}</h2>
+
+            {ownSteps.length > 0 ? (
+              <ol className="recipe-view__steps">
+                {ownSteps.map((s, i) => (
+                  <li key={s.step_number ?? i} className="recipe-view__step">
+                    <span className="recipe-view__step-num">{t.stepLabel} {i + 1}</span>
+                    {s.step_name && <strong className="recipe-view__step-name">{s.step_name}</strong>}
+                    {s.description && <p className="recipe-view__step-text">{s.description}</p>}
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              // No own steps: show a single "no preparation steps" line, but
+              // only while no base sub-recipe has steps to show below.
+              !anySubHasSteps && <p className="recipe-view__substeps-state">{t.noPrepSteps}</p>
+            )}
+
+            {/* Base recipes used as sub-recipes — only those WITH steps are
+                rendered (empty ones self-hide so there are no blank rows). */}
+            {subLines.map((l) => (
+              <SubRecipeSteps
+                key={l.line_id}
+                itemId={l.ingredient_id}
+                name={l.ingredient}
+                onResolved={(has) =>
+                  setSubStepsInfo((prev) => (prev[l.ingredient_id] === has ? prev : { ...prev, [l.ingredient_id]: has }))
+                }
+              />
+            ))}
+          </section>
+        );
+      })()}
+    </div>
+  );
+};
+
+/**
+ * Collapsible block showing a base (sub-)recipe's preparation steps.
+ * Fetches the sub-recipe's detail eagerly and renders NOTHING when that
+ * sub-recipe has no steps (so the section never shows empty rows).  It
+ * reports back via onResolved so the parent can decide whether to show a
+ * single "no preparation steps" line.
+ */
+const SubRecipeSteps: React.FC<{ itemId: number; name: string; onResolved: (hasSteps: boolean) => void }> = ({ itemId, name, onResolved }) => {
+  const { t } = useLang();
+  const [open, setOpen] = useState(false);
+  const { data } = useQuery({
+    queryKey: ['bom-detail', itemId],
+    queryFn: () => api.getBom(itemId),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const steps = (data as BomDetail | undefined)?.steps ?? [];
+
+  useEffect(() => {
+    if (data) onResolved(steps.length > 0);
+  }, [data, steps.length, onResolved]);
+
+  // Still loading, or this sub-recipe has no steps → render nothing.
+  if (!data || steps.length === 0) return null;
+
+  return (
+    <div className="recipe-view__substeps">
+      <button
+        type="button"
+        className="recipe-view__substeps-toggle"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <span className="recipe-view__sub-pill recipe-view__sub-pill--sub">{t.subRecipe}</span>
+        <span className="recipe-view__substeps-name">{name}</span>
+        <span className="recipe-view__sub-caret">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <ol className="recipe-view__steps recipe-view__steps--sub">
+          {steps.map((s, i) => (
+            <li key={s.step_number ?? i} className="recipe-view__step">
+              <span className="recipe-view__step-num">{t.stepLabel} {i + 1}</span>
+              {s.step_name && <strong className="recipe-view__step-name">{s.step_name}</strong>}
+              {s.description && <p className="recipe-view__step-text">{s.description}</p>}
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 };

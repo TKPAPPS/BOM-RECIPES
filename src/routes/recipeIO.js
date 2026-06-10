@@ -26,6 +26,7 @@ const {
 const { saveRecipeBom }       = require('../services/recipeWriteService');
 const { resolvePricingForItem } = require('../services/pricingService');
 const { logAudit, getIp }     = require('../services/auditService');
+const { usedNumbersForPrefix } = require('./referenceCodeCategories');
 
 const router = express.Router();
 
@@ -176,6 +177,28 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
   }
   if (recipes.length === 0) {
     return res.status(400).json({ error: 'No recipes were found in the file.' });
+  }
+
+  // ── Auto-assign reference codes to BASE recipes left blank ──
+  // A base recipe with no Reference Code gets the smallest free BAS-####
+  // (filling gaps across all existing codes).  Allocated sequentially so
+  // several blank rows in one file each get a distinct code.
+  try {
+    const usedBAS = await usedNumbersForPrefix('BAS', pool);
+    let nextN = 1;
+    const allocBAS = () => {
+      while (usedBAS.has(nextN)) nextN++;
+      usedBAS.add(nextN);
+      return `BAS-${String(nextN).padStart(4, '0')}`;
+    };
+    for (const r of recipes) {
+      const rtype = r.recipe_type || defaultType;
+      if (rtype === 'base' && !(r.reference_code || '').toString().trim()) {
+        r.reference_code = allocBAS();
+      }
+    }
+  } catch (e) {
+    console.warn('[recipeIO/import] BAS auto-code skipped:', e.message);
   }
 
   // ── Pre-flight: reject the WHOLE file if any reference code already

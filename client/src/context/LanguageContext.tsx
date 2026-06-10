@@ -10,6 +10,7 @@ const translations = {
     buildNewRecipe:      'Build new recipe',
     kitchenRecipesEmpty: 'No recipes yet. Click "Build new recipe" to start.',
     prepStepsSection:    'Preparation steps',
+    noPrepSteps:         'No preparation steps for this recipe.',
     prepStepsFromBase:   'Preparation steps (from the base recipe)',
     optional:            'optional',
     stepLabel:           'Step',
@@ -56,6 +57,9 @@ const translations = {
     recipeTypeLabel:     'Recipe Type',
     baseRecipeOption:    'Base Recipe',
     finalProductOption:  'Final Packaged Product',
+    startFromBase:       'Start from a base recipe',
+    pickBaseRecipe:      'Pick a base recipe…',
+    baseRecipeHint:      'Adds the base recipe as a linked sub-recipe and copies its code, ingredients and preparation steps. You can then add packaging and extra steps.',
     // App header
     bomSystem:           'BOM & Recipe System',
     productionMgmt:      'Production Management',
@@ -99,6 +103,7 @@ const translations = {
     noResults:           'No results found',
     searching:           'Searching…',
     subRecipe:           'Sub-Recipe',
+    openBaseRecipe:      'Open the full base recipe',
     raw:                 'Raw',
     // Production costs
     productionCosts:     'Production Costs',
@@ -442,6 +447,7 @@ const translations = {
     buildNewRecipe:      'בנה מתכון חדש',
     kitchenRecipesEmpty: 'אין עדיין מתכונים. לחצו "בנה מתכון חדש" כדי להתחיל.',
     prepStepsSection:    'שלבי ההכנה',
+    noPrepSteps:         'אין שלבי הכנה למתכון זה.',
     prepStepsFromBase:   'שלבי ההכנה (מהמתכון הבסיס)',
     optional:            'רשות',
     stepLabel:           'שלב',
@@ -488,6 +494,9 @@ const translations = {
     recipeTypeLabel:     'סוג מתכון',
     baseRecipeOption:    'מתכון בסיס',
     finalProductOption:  'מוצר ארוז סופי',
+    startFromBase:       'התחל ממתכון בסיס',
+    pickBaseRecipe:      'בחרי מתכון בסיס…',
+    baseRecipeHint:      'מוסיף את מתכון הבסיס כתת-מתכון מקושר ומעתיק את הקוד, הרכיבים ושלבי ההכנה. אפשר להוסיף אחר כך אריזה ושלבים נוספים.',
     // App header
     bomSystem:           'מערכת BOM ומתכונים',
     productionMgmt:      'ניהול ייצור',
@@ -531,6 +540,7 @@ const translations = {
     noResults:           'לא נמצאו תוצאות',
     searching:           'מחפש…',
     subRecipe:           'תת-מתכון',
+    openBaseRecipe:      'פתח את מתכון הבסיס המלא',
     raw:                 'חומר גלם',
     // Production costs
     productionCosts:     'עלויות ייצור',

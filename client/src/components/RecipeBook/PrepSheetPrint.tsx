@@ -1,7 +1,7 @@
 import React from 'react';
 import { useLang } from '../../context/LanguageContext';
 import { fmtQty } from './imageHelpers';
-import type { CalcResult, CalcIngredient } from '../../types';
+import type { CalcResult, CalcIngredient, BomStep } from '../../types';
 
 /**
  * Print-only DOM region.  Rendered always (so window.print() can
@@ -35,6 +35,7 @@ interface Section {
   desiredKg: number;
   scaleFactor: number;
   ingredients: CalcIngredient[];
+  steps: BomStep[];
 }
 
 function flattenSections(calc: CalcResult, level = 0, acc: Section[] = []): Section[] {
@@ -46,6 +47,7 @@ function flattenSections(calc: CalcResult, level = 0, acc: Section[] = []): Sect
     desiredKg: calc.desired_weight_kg,
     scaleFactor: calc.scale_factor,
     ingredients: calc.ingredients,
+    steps: calc.steps ?? [],
   });
   for (const ing of calc.ingredients) {
     if (ing.ingredient_type === 'recipe' && ing.sub_recipe) {
@@ -114,6 +116,21 @@ export const PrepSheetPrint: React.FC<Props> = ({ calc, recipeMeta }) => {
               ))}
             </tbody>
           </table>
+
+          {/* Preparation steps for this recipe / sub-recipe */}
+          {s.steps.length > 0 && (
+            <div className="prep-sheet__steps">
+              <h3 className="prep-sheet__steps-title">{t.prepStepsSection}</h3>
+              <ol className="prep-sheet__steps-list">
+                {s.steps.map((st, i) => (
+                  <li key={st.step_number ?? i} className="prep-sheet__step">
+                    {st.step_name && <strong className="prep-sheet__step-name">{st.step_name}</strong>}
+                    {st.description && <span className="prep-sheet__step-text">{st.description}</span>}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
         </section>
       ))}
     </section>

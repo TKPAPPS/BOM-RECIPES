@@ -306,6 +306,28 @@ const ImportReport: React.FC<{ report: RecipeImportReport; onClose: () => void }
     setTimeout(cleanup, 1500);
   };
 
+  // Export the currently-shown rows (respects the active filter — e.g. on
+  // the "Failed" tab it exports only the failed recipes with their reason)
+  // to a CSV that opens directly in Excel (UTF-8 BOM keeps Hebrew intact).
+  const handleExportCsv = () => {
+    const esc = (v: string | number) => {
+      const s = String(v ?? '');
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = [t.rioReportRow, t.rioReportName, t.rioReportStatus, t.rioReportMessage];
+    const lines = rows.map((d) => [
+      d.row,
+      d.name,
+      t[STATUS_LABELS[d.status].key as keyof typeof t] as string,
+      d.message,
+    ].map(esc).join(','));
+    const csv = '﻿' + [header.map(esc).join(','), ...lines].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const stamp = new Date().toISOString().slice(0, 10);
+    const scope = filter === 'all' ? 'all' : filter;
+    triggerBlobDownload(blob, `import-report-${scope}-${stamp}.csv`);
+  };
+
   // Clickable summary card.  Clicking a card filters the list to that
   // status; clicking the active card (or "Total") resets to all.
   const card = (key: ReportFilter, num: number, label: string, tone = '') => (
@@ -332,6 +354,7 @@ const ImportReport: React.FC<{ report: RecipeImportReport; onClose: () => void }
           </p>
         </div>
         <div className="rio-report__tools">
+          <button className="btn btn--ghost btn--sm" onClick={handleExportCsv} disabled={rows.length === 0}>⭳ Excel</button>
           <button className="btn btn--ghost btn--sm" onClick={handlePrint}>⎙ {t.rbViewPrint}</button>
           <button className="btn btn--ghost btn--sm" onClick={handlePrint}>⭳ {t.rbViewPdf}</button>
         </div>

@@ -3313,6 +3313,48 @@ a.sidebar-nav__item {
   border-bottom: none;
 }
 
+/* Final-product "start from base recipe" picker */
+.recipe-builder__base-picker {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  background: var(--gold-pale);
+  border: 1px solid var(--gold);
+  border-radius: var(--radius);
+}
+.recipe-builder__base-label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.recipe-builder__base-label > span {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--burgundy);
+}
+.recipe-builder__base-select { max-width: 480px; }
+.recipe-builder__base-hint { margin: 6px 0 0; font-size: 12px; color: var(--text-secondary); }
+
+/* Back / cancel button in the builder title row */
+.recipe-builder__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--burgundy);
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+.recipe-builder__back:hover { background: var(--gold-pale); border-color: var(--gold); }
+[dir="rtl"] .recipe-builder__back svg { transform: scaleX(-1); }
+
 .recipe-builder__dirty-badge {
   display: inline-flex;
   align-items: center;
@@ -4551,6 +4593,20 @@ a.sidebar-nav__item {
 
 .prep-sheet__pill--sub { background: #fdf6e9; color: #56133A; }
 
+/* Preparation steps inside the printed prep sheet */
+.prep-sheet__steps { margin: 8px 0 4px; page-break-inside: avoid; break-inside: avoid; }
+.prep-sheet__steps-title {
+  font-size: 12px;
+  margin: 0 0 4px;
+  color: #56133A;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.prep-sheet__steps-list { margin: 0; padding-inline-start: 20px; }
+.prep-sheet__step { font-size: 12px; margin-bottom: 4px; line-height: 1.4; }
+.prep-sheet__step-name { color: #56133A; margin-inline-end: 6px; }
+.prep-sheet__step-text { white-space: pre-wrap; }
+
 .prep-sheet__totals {
   margin-top: 20px;
   border-top: 2px solid #999;
@@ -5484,6 +5540,100 @@ a.sidebar-nav__item {
   font-size: 12.5px;
   padding: 7px 14px;
 }
+
+/* ── Quantity scaler in the recipe view ingredients header ──── */
+.recipe-view__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.recipe-view__scale {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.recipe-view__scale-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+}
+.recipe-view__scale-input {
+  width: 110px;
+  height: 34px;
+}
+.recipe-view__scale-unit { font-size: 13px; color: var(--text-secondary); }
+.recipe-view__scale-factor {
+  font-weight: 700;
+  color: var(--burgundy);
+  background: var(--gold-pale);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 13px;
+}
+
+/* Clickable base sub-recipe name → opens the full base recipe */
+.recipe-view__ing-name--link {
+  color: var(--burgundy);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--gold);
+  cursor: pointer;
+}
+.recipe-view__ing-name--link:hover { color: var(--gold); border-bottom-style: solid; }
+
+/* ── Preparation steps in the recipe view ──────────────────── */
+.recipe-view__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.recipe-view__steps--sub { margin-top: 8px; }
+.recipe-view__step {
+  padding: 10px 14px;
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.recipe-view__step-num {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--burgundy);
+  margin-bottom: 4px;
+}
+.recipe-view__step-name { display: block; color: var(--burgundy); margin-bottom: 2px; }
+.recipe-view__step-text { margin: 2px 0 0; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+
+/* Collapsible base sub-recipe steps */
+.recipe-view__substeps { margin-top: 12px; }
+.recipe-view__substeps-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: start;
+  padding: 9px 12px;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--burgundy);
+  background: var(--gold-pale);
+  border: 1px solid var(--gold);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.recipe-view__substeps-toggle:hover { background: #f3e6c8; }
+.recipe-view__substeps-name { flex: 1 1 auto; }
+.recipe-view__substeps-state { margin: 8px 0 0; font-size: 13px; color: var(--text-muted); }
 
 /* ── Settings (gear) menu in the recipe view top bar ───────── */
 .recipe-view__menu { position: relative; }
