@@ -13,6 +13,7 @@ import { RecipeImportModal } from './components/RecipeIO/RecipeImportModal';
 import { LanguageProvider, useLang } from './context/LanguageContext';
 import { useAllowedTabs } from './hooks/useAllowedTabs';
 import type { TabKey } from './config/tabs';
+import { getImageSrc } from './components/RecipeBook/imageHelpers';
 import { useAuth } from './context/AuthContext';
 import { useRecipeStore } from './stores/useRecipeStore';
 import { useToastStore } from './stores/useToastStore';
@@ -1082,6 +1083,9 @@ const AppInner: React.FC = () => {
   // (Settings → Permissions), with historical defaults as fallback.
   const { allowed } = useAllowedTabs();
 
+  // Own profile (for the header avatar + name; refreshed after edits).
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: api.getMe, staleTime: 60_000 });
+
   const ALL_NAV: Array<{ key: TabKey; to: string; label: string; end: boolean; icon: React.ReactNode }> = [
     {
       key: 'dashboard', to: '/dashboard', label: t.dashboard, end: true,
@@ -1177,6 +1181,15 @@ const AppInner: React.FC = () => {
         </svg>
       ),
     },
+    {
+      key: 'profile', to: '/profile', label: t.profileTab, end: true,
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+      ),
+    },
   ];
 
   const NAV_ITEMS = ALL_NAV.filter((item) => allowed.has(item.key));
@@ -1204,7 +1217,16 @@ const AppInner: React.FC = () => {
 
         {/* ── User / logout ──────────────────────────────── */}
         <div className="app__user-menu">
-          {user && <span className="app__user-name">{user.name}</span>}
+          <NavLink to="/profile" className="app__user-link" title={t.profileTab}>
+            {getImageSrc(me?.avatar_url ?? null) ? (
+              <img className="app__user-avatar" src={getImageSrc(me?.avatar_url ?? null)!} alt="" />
+            ) : (
+              <span className="app__user-avatar app__user-avatar--ph">
+                {(me?.name || me?.username || user?.name || '?').charAt(0).toUpperCase()}
+              </span>
+            )}
+            <span className="app__user-name">{me?.name || me?.username || user?.name}</span>
+          </NavLink>
           <button
             className="app__logout-btn"
             onClick={logout}

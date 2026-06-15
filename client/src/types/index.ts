@@ -366,6 +366,19 @@ export interface UserRow {
   updated_at: string;
 }
 
+/** The current user's own profile (GET/PATCH /users/me). */
+export interface MeProfile {
+  id: number;
+  odoo_uid: number | null;
+  username: string;
+  name: string | null;
+  email: string | null;
+  role: string;
+  can_view_prices: boolean | null;
+  is_active: boolean;
+  avatar_url: string | null;
+}
+
 export interface AuditLog {
   id: number;
   user_id: number | null;

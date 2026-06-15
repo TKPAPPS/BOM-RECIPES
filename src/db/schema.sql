@@ -360,6 +360,8 @@ CREATE TABLE IF NOT EXISTS users (
 -- Local password hash (scrypt) for admin-created accounts that don't
 -- authenticate via Odoo.  NULL for Odoo / dev-admin users.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+-- Self-service profile picture (base64 data URI or URL).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_users_odoo_uid  ON users(odoo_uid);
 CREATE INDEX IF NOT EXISTS idx_users_username  ON users(username);

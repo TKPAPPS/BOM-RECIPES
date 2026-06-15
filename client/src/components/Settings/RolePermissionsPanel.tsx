@@ -57,7 +57,7 @@ export const RolePermissionsPanel: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {TABS.map((tab) => (
+            {TABS.filter((tab) => !tab.alwaysOn).map((tab) => (
               <tr key={tab.key}>
                 <td>{(t as Record<string, string>)[tab.labelKey] || tab.key}</td>
                 {ROLES.map((role) => {

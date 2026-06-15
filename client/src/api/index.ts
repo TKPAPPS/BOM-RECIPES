@@ -1,4 +1,4 @@
-import type { SearchResult, PricingFormula, BomDetail, BomSummary, Category, BomSnapshot, AffectedRecipesResult, RecipeType, CalcResult, UserRow, AuditLogPage, SyncStatus, DashboardSummary, ProductRow, ProductOverride, RecipeImportReport, RecipeExportFilters, TestRecipeSummary, TestRecipeDetail, TestRecipeDraft, ReferenceCodeCategory } from '../types';
+import type { SearchResult, PricingFormula, BomDetail, BomSummary, Category, BomSnapshot, AffectedRecipesResult, RecipeType, CalcResult, UserRow, AuditLogPage, SyncStatus, DashboardSummary, ProductRow, ProductOverride, RecipeImportReport, RecipeExportFilters, TestRecipeSummary, TestRecipeDetail, TestRecipeDraft, ReferenceCodeCategory, MeProfile } from '../types';
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api';
 
@@ -252,6 +252,11 @@ export const api = {
 
   triggerCostRecalc: () =>
     post<{ recalculated: number; failed: unknown[] }>('/sync/costs', {}),
+
+  // ── Self-service profile (any authenticated user) ─────────
+  getMe: () => get<MeProfile>('/users/me'),
+  updateMe: (body: { name?: string; username?: string; avatar_url?: string | null; password?: string }) =>
+    patch<MeProfile>('/users/me', body),
 
   getUsers: (params?: { role?: string; active?: boolean }) => {
     const qs = new URLSearchParams();

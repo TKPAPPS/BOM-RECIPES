@@ -45,7 +45,63 @@ router.get('/me', (req, res) => {
     role:            u.role,
     can_view_prices: u.can_view_prices,
     is_active:       u.is_active,
+    avatar_url:      u.avatar_url ?? null,
   });
+});
+
+// ── PATCH /api/users/me — self-service profile (any auth'd user) ─────
+// A user may edit their own display name, username, profile picture and
+// set/replace a local password.  Mounted before requireAdmin.
+router.patch('/me', async (req, res) => {
+  if (!req.localUser) return res.status(401).json({ message: 'Not authenticated.' });
+  const id = req.localUser.id;
+  const b = req.body || {};
+  const sets = [];
+  const params = [];
+  const push = (frag, val) => { params.push(val); sets.push(`${frag} = $${params.length}`); };
+
+  if ('name' in b) push('name', (b.name ?? '').toString().trim() || null);
+
+  if ('username' in b) {
+    const username = (b.username ?? '').toString().trim();
+    if (!username) return res.status(400).json({ error: 'username cannot be empty' });
+    const clash = await pool.query('SELECT 1 FROM users WHERE LOWER(username) = LOWER($1) AND id <> $2', [username, id]);
+    if (clash.rowCount) return res.status(409).json({ error: 'username already taken' });
+    push('username', username);
+  }
+
+  if ('avatar_url' in b) {
+    const a = b.avatar_url;
+    push('avatar_url', a == null || a === '' ? null : String(a));
+  }
+
+  if (b.password) {
+    const pw = String(b.password);
+    if (pw.length < 6) return res.status(400).json({ error: 'password must be at least 6 characters' });
+    push('password_hash', hashPassword(pw));
+  }
+
+  if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+
+  params.push(id);
+  const { rows } = await pool.query(
+    `UPDATE users SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length}
+     RETURNING id, odoo_uid, username, name, email, role, can_view_prices, is_active, avatar_url`,
+    params
+  );
+
+  await logAudit({
+    userId:      id,
+    actionType:  'user_self_update',
+    entity:      'user',
+    entityId:    id,
+    description: `User updated own profile (${Object.keys(b).filter((k) => ['name', 'username', 'avatar_url', 'password'].includes(k)).join(', ')})`,
+    valueBefore: null,
+    valueAfter:  { fields: Object.keys(b) },
+    ipAddress:   getIp(req),
+  });
+
+  res.json(rows[0]);
 });
 
 // ── Everything below requires admin ─────────────────────────────────

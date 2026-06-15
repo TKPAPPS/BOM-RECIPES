@@ -3,7 +3,7 @@
 
 export type TabKey =
   | 'dashboard' | 'book' | 'kitchen' | 'test'
-  | 'pending' | 'whereused' | 'products' | 'settings' | 'logs';
+  | 'pending' | 'whereused' | 'products' | 'settings' | 'logs' | 'profile';
 
 export type Role = 'customer' | 'admin' | 'manager';
 
@@ -11,6 +11,7 @@ export interface TabDef {
   key: TabKey;
   path: string;       // primary route for this tab
   labelKey: string;   // key into the translation table (t[labelKey])
+  alwaysOn?: boolean;  // always visible to every role; not in the permission matrix
 }
 
 // Order here = order in the sidebar AND the order used to pick a
@@ -25,7 +26,12 @@ export const TABS: TabDef[] = [
   { key: 'products',  path: '/products',        labelKey: 'products' },
   { key: 'settings',  path: '/settings',        labelKey: 'settings' },
   { key: 'logs',      path: '/logs',            labelKey: 'logs' },
+  // Personal area — always available to every user, not configurable.
+  { key: 'profile',   path: '/profile',         labelKey: 'profileTab', alwaysOn: true },
 ];
+
+/** Tabs that every role always sees (not part of the permission matrix). */
+export const ALWAYS_ON_TABS: TabKey[] = TABS.filter((t) => t.alwaysOn).map((t) => t.key);
 
 export const ALL_TAB_KEYS: TabKey[] = TABS.map((t) => t.key);
 

@@ -28,7 +28,7 @@ const pool = require('../config/db');
 const { canViewPrices, stripPrices } = require('../utils/priceVisibility');
 
 const USER_SELECT_COLS =
-  'id, odoo_uid, username, name, email, role, can_view_prices, is_active';
+  'id, odoo_uid, username, name, email, role, can_view_prices, is_active, avatar_url';
 
 async function authMiddleware(req, res, next) {
   const authHeader = req.headers['authorization'];

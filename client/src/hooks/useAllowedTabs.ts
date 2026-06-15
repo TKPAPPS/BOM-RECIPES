@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
-import { defaultTabsFor, type Role, type TabKey } from '../config/tabs';
+import { defaultTabsFor, ALWAYS_ON_TABS, type Role, type TabKey } from '../config/tabs';
 
 /**
  * The set of sidebar tabs the current user is allowed to see, driven by
@@ -22,6 +22,7 @@ export function useAllowedTabs(): { allowed: Set<TabKey>; isLoading: boolean } {
   const list = (data?.[role] as TabKey[] | undefined) ?? defaultTabsFor(role);
   const allowed = new Set<TabKey>(list);
   if (role === 'manager') allowed.add('settings');
+  ALWAYS_ON_TABS.forEach((k) => allowed.add(k)); // personal area is always available
 
   return { allowed, isLoading };
 }
