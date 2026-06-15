@@ -528,6 +528,36 @@ ALTER TABLE boms ADD COLUMN IF NOT EXISTS packaging_cost NUMERIC(14, 6) NOT NULL
 ALTER TABLE boms ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- ------------------------------------------------------------
+-- Sale unit of measure for FINAL products: 'kg' (default) or
+-- 'unit'.  When 'unit' the whole recipe yield is one sellable
+-- unit, so prices/costs are shown per unit (= the per-yield total)
+-- instead of per kg.
+-- ------------------------------------------------------------
+ALTER TABLE boms ADD COLUMN IF NOT EXISTS sale_uom VARCHAR(8) NOT NULL DEFAULT 'kg'
+  CHECK (sale_uom IN ('kg', 'unit'));
+
+-- ------------------------------------------------------------
+-- Per-role sidebar tab visibility.  The manager configures which
+-- menu tabs each role (customer/admin/manager) may see.  `tabs` is
+-- an array of canonical tab keys (dashboard, book, kitchen, test,
+-- pending, whereused, products, settings, logs).  Seeded once with
+-- the historical defaults; ON CONFLICT DO NOTHING so re-running the
+-- migration never clobbers a manager's customisation.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS role_tab_permissions (
+  role       VARCHAR(20) PRIMARY KEY CHECK (role IN ('customer', 'admin', 'manager')),
+  tabs       TEXT[] NOT NULL DEFAULT '{}',
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO role_tab_permissions (role, tabs) VALUES
+  ('customer', '{book}'),
+  ('admin',    '{book,test,products}'),
+  ('manager',  '{dashboard,book,kitchen,test,pending,whereused,products,settings,logs}')
+ON CONFLICT (role) DO NOTHING;
+
+-- ------------------------------------------------------------
 -- STEP 1.8 — bom_lines extensions
 --   • ingredient_type: explicit mirror of items.item_type so the
 --     line row is self-describing without a JOIN.  Values match
@@ -655,6 +685,12 @@ CREATE SEQUENCE IF NOT EXISTS pricing_formulas_uid_seq;
 
 ALTER TABLE pricing_formulas ADD COLUMN IF NOT EXISTS formula_uid INTEGER;
 ALTER TABLE pricing_formulas ADD COLUMN IF NOT EXISTS is_default  BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Free-form pricing formula expression per tier (e.g. "cost * 1.5 * 1.07").
+-- When set it is the human-editable source of truth; the numeric
+-- `multiplier` is kept in sync (= the formula's value at cost=1) so the
+-- existing multiplier-based pricing engine keeps working unchanged.
+ALTER TABLE pricing_formulas ADD COLUMN IF NOT EXISTS formula_expr TEXT;
 
 -- Backfill formula_uid for existing rows: each distinct
 -- (scope, scope_ref_id, name) group gets a uid = MIN(id) within

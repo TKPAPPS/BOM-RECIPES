@@ -394,7 +394,7 @@ export const IngredientRow: React.FC<Props> = React.memo(({ line, onUpdate, onRe
             title="Select unit of measure"
           >
             {SUPPORTED_UOMS.map((u) => (
-              <option key={u} value={u}>{u}</option>
+              <option key={u} value={u}>{u === 'each' ? 'unit' : u}</option>
             ))}
           </select>
         </div>

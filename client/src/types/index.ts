@@ -135,6 +135,9 @@ export interface PricingFormula {
   name: string;
   wholesale_multiplier: number;
   retail_multiplier: number;
+  /** Free-form expression (e.g. "cost * 1.5 * 1.07"); null on legacy rows. */
+  wholesale_formula?: string | null;
+  retail_formula?: string | null;
   is_default: boolean;
 }
 
@@ -182,6 +185,8 @@ export interface BomDetail {
   total_weight?: number | null;
   reference_code: string | null;
   recipe_type: RecipeType;
+  /** Final-product sale unit: 'kg' (default) or 'unit' (whole yield = 1 unit). */
+  sale_uom?: 'kg' | 'unit';
   yield_kg: number;
   /** Cost fields may be absent (stripped) for customers without view-price permission. */
   cost_per_kg?: number | null;
@@ -203,6 +208,7 @@ export interface BomSummary {
   full_name?: string | null;
   reference_code: string | null;
   recipe_type: RecipeType;
+  sale_uom?: 'kg' | 'unit';
   yield_kg: number;
   total_weight?: number | null;
   servings_count?: number | null;

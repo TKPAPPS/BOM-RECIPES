@@ -10,6 +10,8 @@ interface Props {
   overheadCost?: number;
   /** Show wholesale/retail pricing tiles — only for Final Packaged Products */
   showPricing?: boolean;
+  /** 'unit' → whole yield is one sellable unit; show cost per unit (= total). */
+  saleUom?: 'kg' | 'unit';
 }
 
 const fmt = (n: number) =>
@@ -119,8 +121,9 @@ const Tile: React.FC<TileProps> = ({ label, value, sub, formula, highlight, acce
   );
 };
 
-export const CostDisplay: React.FC<Props> = React.memo(({ tier, yieldKg, laborCost = 0, overheadCost = 0, showPricing = false }) => {
+export const CostDisplay: React.FC<Props> = React.memo(({ tier, yieldKg, laborCost = 0, overheadCost = 0, showPricing = false, saleUom = 'kg' }) => {
   const { t } = useLang();
+  const perUnit = saleUom === 'unit';
 
   if (!tier) {
     return (
@@ -153,10 +156,10 @@ export const CostDisplay: React.FC<Props> = React.memo(({ tier, yieldKg, laborCo
 
   const tiles: TileProps[] = [
     {
-      label:   t.costPerKg,
-      value:   fmt(tier.cost_per_kg),
-      sub:     `Fully-burdened ÷ ${yieldKg} kg yield`,
-      formula: costPerKgFormula,
+      label:   perUnit ? t.costPerUnit : t.costPerKg,
+      value:   perUnit ? fmt(total_cost) : fmt(tier.cost_per_kg),
+      sub:     perUnit ? `${t.saleUomUnit} = ${yieldKg} kg` : `Fully-burdened ÷ ${yieldKg} kg yield`,
+      formula: perUnit ? totalCostFormula : costPerKgFormula,
       highlight: false,
       accent:    false,
     },

@@ -1887,6 +1887,74 @@ label {
   padding: 20px 24px;
 }
 
+/* ── Role tab-permissions matrix ───────────────────────────── */
+.role-perms__hint { font-size: 13px; color: var(--text-secondary); margin: 0 0 16px; }
+.role-perms__table { border-collapse: collapse; width: 100%; max-width: 600px; font-size: 13px; }
+.role-perms__table th, .role-perms__table td { border: 1px solid var(--border); padding: 9px 12px; text-align: start; }
+.role-perms__table th { background: var(--bg-light); font-weight: 700; color: var(--burgundy); }
+.role-perms__cell { text-align: center; }
+.role-perms__cell input { width: 18px; height: 18px; cursor: pointer; accent-color: var(--burgundy); }
+.role-perms__cell input:disabled { cursor: not-allowed; opacity: 0.7; }
+
+/* ── Free-form formula builder ─────────────────────────────── */
+.formula-manager__hint { font-size: 13px; color: var(--text-secondary); margin: 0 0 14px; }
+.formula-manager__expr {
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-size: 12px;
+  background: var(--gold-pale);
+  color: var(--burgundy);
+  padding: 2px 6px;
+  border-radius: 4px;
+  direction: ltr;
+  display: inline-block;
+}
+.formula-builder { margin: 14px 0; }
+.formula-builder__label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--burgundy);
+  margin-bottom: 6px;
+}
+.formula-builder__input {
+  width: 100%;
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-size: 14px;
+}
+.formula-builder__input--error { border-color: var(--error) !important; background: var(--error-light); }
+.formula-builder__keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+.formula-builder__key {
+  min-width: 34px;
+  height: 32px;
+  padding: 0 10px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--burgundy);
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+.formula-builder__key:hover { background: var(--gold-pale); border-color: var(--gold); }
+.formula-builder__key--var { background: var(--burgundy); color: #fff; border-color: var(--burgundy); }
+.formula-builder__key--vat { font-size: 12px; }
+.formula-builder__preview {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  direction: ltr;
+  text-align: start;
+}
+.formula-builder__preview--error { color: var(--error); }
+
 .formula-manager__form h3 {
   font-size: 13px;
   font-weight: 700;
@@ -6176,7 +6244,7 @@ a.sidebar-nav__item {
 }
 .rb-subrecipe__row {
   display: grid;
-  grid-template-columns: 1fr 140px 110px;
+  grid-template-columns: 1fr 120px 90px 90px 90px;
   align-items: center;
   gap: 10px;
   padding: 6px 0;
@@ -6184,13 +6252,14 @@ a.sidebar-nav__item {
   font-size: 12.5px;
 }
 .rb-subrecipe__row:first-child { border-top: none; }
-.rb-subrecipe__qty {
+.rb-subrecipe__qty,
+.rb-subrecipe__num {
   text-align: end;
-  font-weight: 600;
-  color: var(--burgundy);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+.rb-subrecipe__qty { font-weight: 600; color: var(--burgundy); }
+.rb-subrecipe__num { color: var(--text-secondary); }
 
 /* ── Clickable name cell in BOM History ───────────────────── */
 .bom-history__name-cell {

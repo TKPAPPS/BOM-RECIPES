@@ -47,6 +47,7 @@
  */
 
 const pool = require('../config/db');
+const { applyFormula } = require('../utils/formulaEval');
 
 // Hard fallback if the default flag is ever lost.  Matches the
 // historical seed values in db/schema.sql.
@@ -116,14 +117,10 @@ async function resolvePricingForItem(itemId, client) {
     formula = HARDCODED_DEFAULT;
   }
 
-  const wholesalePrice =
-    costPerKg != null && formula.wholesale_multiplier != null
-      ? costPerKg * formula.wholesale_multiplier
-      : null;
-  const retailPrice =
-    costPerKg != null && formula.retail_multiplier != null
-      ? costPerKg * formula.retail_multiplier
-      : null;
+  // Evaluate the formula directly on the per-kg cost (exact — supports
+  // rounding/constants), falling back to cost × multiplier.
+  const wholesalePrice = applyFormula(formula.wholesale_formula, formula.wholesale_multiplier, costPerKg);
+  const retailPrice    = applyFormula(formula.retail_formula,    formula.retail_multiplier,    costPerKg);
 
   return {
     item_id: ctx.item_id,
@@ -137,6 +134,8 @@ async function resolvePricingForItem(itemId, client) {
     selection,
     wholesale_multiplier: formula.wholesale_multiplier,
     retail_multiplier:    formula.retail_multiplier,
+    wholesale_formula:    formula.wholesale_formula || null,
+    retail_formula:       formula.retail_formula || null,
     wholesale_price:      wholesalePrice,
     retail_price:         retailPrice,
   };
@@ -156,7 +155,9 @@ async function fetchFormulaByUid(db, formulaUid) {
             MAX(name)                                                        AS name,
             bool_or(is_default)                                              AS is_default,
             MAX(CASE WHEN price_tier = 'wholesale' THEN multiplier END)::float AS wholesale_multiplier,
-            MAX(CASE WHEN price_tier = 'retail'    THEN multiplier END)::float AS retail_multiplier
+            MAX(CASE WHEN price_tier = 'retail'    THEN multiplier END)::float AS retail_multiplier,
+            MAX(CASE WHEN price_tier = 'wholesale' THEN formula_expr END)      AS wholesale_formula,
+            MAX(CASE WHEN price_tier = 'retail'    THEN formula_expr END)      AS retail_formula
      FROM   pricing_formulas
      WHERE  formula_uid = $1
        AND  is_active   = TRUE

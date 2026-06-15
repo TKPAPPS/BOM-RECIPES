@@ -1,6 +1,21 @@
 const express = require('express');
 const pool    = require('../config/db');
-const { resolvePricingForItem } = require('../services/pricingService');
+const {
+  resolvePricingForItem,
+  fetchDefaultFormula,
+  fetchFormulaById,
+} = require('../services/pricingService');
+const { applyFormula }          = require('../utils/formulaEval');
+
+// Last-resort pricing if no active default formula exists (mirrors the
+// HARDCODED_DEFAULT in pricingService).  Used by the batch list resolver.
+const HARDCODED_PRICING = {
+  name: null,
+  wholesale_multiplier: 2.5,
+  retail_multiplier:    5.0,
+  wholesale_formula:    null,
+  retail_formula:       null,
+};
 const { calculateForOutput }    = require('../services/calculationService');
 const { saveRecipeBom }         = require('../services/recipeWriteService');
 const { requireAdmin }      = require('../middleware/authMiddleware');
@@ -70,6 +85,7 @@ router.get('/', async (req, res) => {
             b.full_name,
             b.reference_code,
             b.recipe_type,
+            b.sale_uom,
             b.yield_kg,
             b.total_weight,
             b.servings_count,
@@ -99,36 +115,33 @@ router.get('/', async (req, res) => {
     [typeFilter, archivedFilter]
   );
 
-  // Resolve live pricing per row via the engine.  Parallel to keep
-  // latency low; each call is 2 small indexed lookups (~ms) so 100s
-  // of recipes still respond well under a second.
-  const enriched = await Promise.all(rows.map(async (r) => {
-    // Never let a single bad pricing lookup 500 the whole list — fall
-    // back to a neutral pricing shape and still return the row.
-    let p;
-    try {
-      p = await resolvePricingForItem(r.item_id);
-    } catch (err) {
-      console.warn(`[GET /boms] pricing resolve failed for item ${r.item_id}:`, err.message);
-      p = { wholesale_multiplier: null, retail_multiplier: null, formula: { name: null }, selection: 'auto' };
-    }
+  // Resolve live pricing in BATCH — avoid the per-recipe N+1 (which on a
+  // remote DB cost ~3 round-trips × every recipe).  The default formula is
+  // shared by all auto-priced recipes, so fetch it ONCE; only the few
+  // recipes that PIN a specific formula need an extra lookup (deduped).
+  const defaultFormula = await fetchDefaultFormula(pool).catch(() => null);
+  const pinnedIds = [...new Set(rows.map((r) => r.pricing_formula_id).filter(Boolean))];
+  const pinnedPairs = await Promise.all(pinnedIds.map(async (id) => {
+    try { return [id, await fetchFormulaById(pool, id)]; } catch { return [id, null]; }
+  }));
+  const pinnedMap = new Map(pinnedPairs);
+
+  const enriched = rows.map((r) => {
+    const pinned   = r.pricing_formula_id ? pinnedMap.get(r.pricing_formula_id) : null;
+    const formula  = pinned || defaultFormula || HARDCODED_PRICING;
     const totalCost = r.total_cost != null ? parseFloat(r.total_cost) : null;
     return {
       ...r,
-      wholesale_multiplier: p.wholesale_multiplier,
-      retail_multiplier:    p.retail_multiplier,
-      wholesale_for_yield:
-        totalCost != null && p.wholesale_multiplier != null
-          ? totalCost * p.wholesale_multiplier
-          : null,
-      retail_for_yield:
-        totalCost != null && p.retail_multiplier != null
-          ? totalCost * p.retail_multiplier
-          : null,
-      formula_name:      p.formula.name,
-      pricing_selection: p.selection, // 'manual' | 'auto'
+      wholesale_multiplier: formula?.wholesale_multiplier ?? null,
+      retail_multiplier:    formula?.retail_multiplier ?? null,
+      // Evaluate the formula on the TOTAL cost (exact — supports rounding),
+      // falling back to total × multiplier.
+      wholesale_for_yield: applyFormula(formula?.wholesale_formula, formula?.wholesale_multiplier, totalCost),
+      retail_for_yield:    applyFormula(formula?.retail_formula,    formula?.retail_multiplier,    totalCost),
+      formula_name:        formula?.name ?? null,
+      pricing_selection:   pinned ? 'manual' : 'auto',
     };
-  }));
+  });
 
   res.json(enriched);
 });
@@ -147,6 +160,7 @@ router.get('/:itemId', async (req, res) => {
             b.servings_count,
             b.total_weight,
             b.recipe_type,
+            b.sale_uom,
             b.yield_kg,
             b.notes,
             b.version,

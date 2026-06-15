@@ -95,17 +95,24 @@ export const api = {
     }>(`/items/${itemId}/pricing`),
 
   resolvePricing: (referenceCode: string) =>
-    get<{ wholesale_multiplier: number; retail_multiplier: number }>(
+    get<{ wholesale_multiplier: number; retail_multiplier: number; wholesale_formula?: string | null; retail_formula?: string | null }>(
       `/pricing/resolve?reference_code=${encodeURIComponent(referenceCode)}`
     ),
+
+  // ── Role tab permissions ──────────────────────────────────
+  getRolePermissions: () =>
+    get<Record<string, string[]>>('/role-permissions'),
+
+  updateRolePermissions: (role: string, tabs: string[]) =>
+    put<{ role: string; tabs: string[] }>('/role-permissions', { role, tabs }),
 
   getFormulas: () =>
     get<PricingFormula[]>('/pricing'),
 
-  createFormula: (formula: { name: string; wholesale_multiplier: number; retail_multiplier: number }) =>
+  createFormula: (formula: { name: string; wholesale_formula: string; retail_formula: string }) =>
     post<PricingFormula>('/pricing', formula),
 
-  updateFormula: (id: number, formula: { name: string; wholesale_multiplier: number; retail_multiplier: number }) =>
+  updateFormula: (id: number, formula: { name: string; wholesale_formula: string; retail_formula: string }) =>
     put<PricingFormula>(`/pricing/${id}`, formula),
 
   setDefaultFormula: (id: number) =>
@@ -138,6 +145,7 @@ export const api = {
     servings_count?: number | null;
     total_weight?: number | null;
     pricing_formula_id?: number | null;
+    sale_uom?: 'kg' | 'unit';
     lines: {
       ingredient_item_id: number;
       quantity_kg: number;

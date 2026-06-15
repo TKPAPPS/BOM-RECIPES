@@ -22,13 +22,27 @@
  * weightExtractor.js.
  */
 
-const { extractWeightFromName } = require('./weightExtractor');
+const { extractWeightFromName, extractCountFromName } = require('./weightExtractor');
 
 /** Coerce to a finite number or null (accepts numeric strings from pg). */
 function toNum(v) {
   if (v == null) return null;
   const n = typeof v === 'string' ? parseFloat(v) : v;
   return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * True when the product's Odoo UOM means it is counted in whole units
+ * (so its standard_price is already a PER-UNIT cost and must NOT be
+ * divided by any weight/volume parsed out of the name — e.g. a packaging
+ * box named "… 4.2 lt 1 Units" is one unit, not 4.2 litres of content).
+ */
+function isUnitUom(uom) {
+  if (!uom) return false;
+  const u = String(uom).trim().toLowerCase();
+  return u === 'unit' || u === 'units' || u === 'each' || u === 'ea'
+      || u === 'pc' || u === 'pcs' || u === 'piece' || u === 'pieces'
+      || u === 'יחידה' || u === 'יחידות' || u === 'יח' || u === "יח'";
 }
 
 /**
@@ -74,6 +88,21 @@ function resolveProductCost(input) {
     weightGrams  = odooWeightKg * 1000;
     weightSource = 'odoo';
     measure      = 'weight';
+  } else if (isUnitUom(input.uom)) {
+    // Per-unit product.  Only an explicit COUNT in the name ("50 units",
+    // "6 יחידות") divides the cost → price per unit; a weight/volume in the
+    // name is packaging capacity, not content, so it is ignored.  With no
+    // count token the cost falls through to the per-unit branch below
+    // (costPerKg = raw cost = price for one Odoo unit).
+    const cnt = extractCountFromName(input.name);
+    if (cnt) {
+      weightGrams  = cnt.grams;        // count × 1000 → rawCost/(grams/1000) = per unit
+      weightSource = 'name_regex';
+      measure      = 'count';
+    } else {
+      measure      = 'count';
+      weightSource = 'none';
+    }
   } else {
     const ext = extractWeightFromName(input.name);
     if (ext) {

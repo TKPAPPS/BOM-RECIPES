@@ -148,9 +148,12 @@ async function expand(itemId, desiredWeightKg, ancestors, db) {
             ing.cost_per_kg AS ing_cost_per_kg,
             ing.uom         AS ing_uom,
             ing.image_url   AS ing_image,
-            ing.reference   AS ing_reference
+            -- raw materials carry the code on items.reference; sub-recipes
+            -- carry it on their BOM (boms.reference_code) → fall back to it.
+            COALESCE(ing.reference, ib.reference_code) AS ing_reference
      FROM   bom_lines l
      JOIN   items ing ON ing.id = l.ingredient_item_id
+     LEFT JOIN boms ib ON ib.item_id = l.ingredient_item_id AND ib.is_active = TRUE
      WHERE  l.bom_id = $1
      ORDER  BY l.id`,
     [head.bom_id]

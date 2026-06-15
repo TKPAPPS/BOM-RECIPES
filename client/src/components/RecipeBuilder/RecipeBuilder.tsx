@@ -10,7 +10,7 @@ import { IngredientRow } from './IngredientRow';
 import { CostDisplay } from './CostDisplay';
 import { buildRecipeDraftFromDetail, buildBuilderFromTestRecipe } from './recipeDraft';
 import { readImageFileSmart } from '../RecipeBook/imageHelpers';
-import type { IngredientLine, TestRecipeDraft, SearchResult } from '../../types';
+import type { IngredientLine, TestRecipeDraft } from '../../types';
 import { nanoid } from 'nanoid';
 
 // Generous raw-file ceiling.  Above this the server's express.json
@@ -29,12 +29,15 @@ export const RecipeBuilder: React.FC<{ mode?: 'real' | 'test' }> = ({ mode = 're
     referenceCode,
     yieldKg,
     recipeType,
+    saleUom,
     lines,
     steps,
     mode: storeMode,
     testId,
     wholesaleMultiplier,
     retailMultiplier,
+    wholesaleFormula,
+    retailFormula,
     pricingFormulaId,
     laborCost,
     overheadCost,
@@ -53,6 +56,7 @@ export const RecipeBuilder: React.FC<{ mode?: 'real' | 'test' }> = ({ mode = 're
     setReferenceCode,
     setYield,
     setRecipeType,
+    setSaleUom,
     setMultipliers,
     setPricingFormulaId,
     setFullName,
@@ -101,7 +105,8 @@ export const RecipeBuilder: React.FC<{ mode?: 'real' | 'test' }> = ({ mode = 're
   const costTier = useBomCost(
     lines, yieldKg,
     wholesaleMultiplier, retailMultiplier,
-    laborCost, overheadCost, packagingCost
+    laborCost, overheadCost, packagingCost,
+    wholesaleFormula, retailFormula
   );
 
   // ── Load existing BOM when visiting /recipe/:itemId ──────────
@@ -134,6 +139,7 @@ export const RecipeBuilder: React.FC<{ mode?: 'real' | 'test' }> = ({ mode = 're
           referenceCode:     detail.reference_code ?? '',
           yieldKg:           detail.yield_kg,
           recipeType:        detail.recipe_type    ?? 'base',
+          saleUom:           detail.sale_uom       ?? 'kg',
           laborCost:         detail.labor_cost     ?? 0,
           overheadCost:      detail.overhead_cost  ?? 0,
           packagingCost:     detail.packaging_cost ?? 0,
@@ -224,50 +230,6 @@ export const RecipeBuilder: React.FC<{ mode?: 'real' | 'test' }> = ({ mode = 're
     }
   }, [setReferenceCode, toast, t]);
 
-  // Final products start from a base recipe.  This list feeds the picker;
-  // it's the system's BASE RECIPES only (not raw Odoo products).
-  const { data: baseRecipes = [] } = useQuery({
-    queryKey: ['boms', 'base', false],
-    queryFn: () => api.getBoms('base', { archived: false }),
-    staleTime: 30_000,
-    enabled: recipeType === 'final',
-  });
-
-  // Pick a base recipe → add it as ONE linked sub-recipe ingredient line
-  // and copy its name + code (name editable).  The existing base-recipe
-  // effect above then auto-fills branding + preparation steps from it.
-  const handlePickBaseRecipe = useCallback((baseItemId: number) => {
-    const b = baseRecipes.find((r) => r.item_id === baseItemId);
-    if (!b) return;
-    const item: SearchResult = {
-      id:            b.item_id,
-      name:          b.recipe_name,
-      name_en:       b.recipe_name,
-      name_he:       null,
-      reference:     b.reference_code,
-      type:          'recipe',
-      cost_per_kg:   b.cost_per_kg ?? 0,
-      unit:          'kg',
-      volume_weight: null,
-      image_url:     b.image_url ?? null,
-    };
-    const st = useRecipeStore.getState();
-    const empty = st.lines.find((l) => !l.item && !l.adhocName);
-    let targetId: string;
-    if (empty) {
-      targetId = empty.lineId;
-    } else {
-      st.addLine();
-      targetId = useRecipeStore.getState().lines.slice(-1)[0].lineId;
-    }
-    const qty = b.yield_kg && b.yield_kg > 0 ? b.yield_kg : 1;
-    st.updateLine(targetId, { item, line_uom: 'kg', quantity_input: qty, quantity_kg: qty });
-    st.setRecipeName(b.recipe_name);
-    st.setReferenceCode(b.reference_code ?? '');
-    if (b.yield_kg && b.yield_kg > 0) st.setYield(b.yield_kg);
-    setFieldErrors((prev) => ({ ...prev, recipeName: false, referenceCode: false, yieldKg: false, emptyIngredients: false }));
-  }, [baseRecipes]);
-
   // Live resolver lookup for the loaded recipe — tells us which formula
   // the server would actually apply RIGHT NOW (manual or auto).  Used
   // to surface the stale-pin warning when boms.pricing_formula_id is
@@ -291,7 +253,7 @@ export const RecipeBuilder: React.FC<{ mode?: 'real' | 'test' }> = ({ mode = 're
     if (pricingFormulaId !== null) {
       const selected = formulas.find((f) => f.id === pricingFormulaId);
       if (selected) {
-        setMultipliers(selected.wholesale_multiplier, selected.retail_multiplier);
+        setMultipliers(selected.wholesale_multiplier, selected.retail_multiplier, selected.wholesale_formula, selected.retail_formula);
       }
       return;
     }
@@ -299,7 +261,7 @@ export const RecipeBuilder: React.FC<{ mode?: 'real' | 'test' }> = ({ mode = 're
     const timer = setTimeout(async () => {
       try {
         const result = await api.resolvePricing(referenceCode);
-        setMultipliers(result.wholesale_multiplier, result.retail_multiplier);
+        setMultipliers(result.wholesale_multiplier, result.retail_multiplier, result.wholesale_formula, result.retail_formula);
       } catch {
         // silently ignore
       }
@@ -435,6 +397,7 @@ export const RecipeBuilder: React.FC<{ mode?: 'real' | 'test' }> = ({ mode = 're
         servings_count:     servingsCount,
         total_weight:       totalWeight,
         pricing_formula_id: pricingFormulaId,
+        sale_uom:           recipeType === 'final' ? saleUom : 'kg',
         lines: validLines.map((l) => ({
           ingredient_item_id: l.item!.id,
           quantity_kg:        l.quantity_kg,
@@ -499,18 +462,7 @@ export const RecipeBuilder: React.FC<{ mode?: 'real' | 'test' }> = ({ mode = 're
 
   const handleYieldChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseFloat(e.target.value);
-    if (isNaN(val) || val <= 0) return;
-    setYield(val);
-    // Final product built from a single base recipe: the base sub-recipe
-    // line quantity tracks the final yield, so the ingredients are computed
-    // for exactly the kg entered (final = <yield> kg of the base recipe).
-    if (recipeType === 'final') {
-      const st = useRecipeStore.getState();
-      const baseLines = st.lines.filter((l) => l.item?.type === 'recipe');
-      if (baseLines.length === 1) {
-        st.updateLine(baseLines[0].lineId, { quantity_input: val, quantity_kg: val, line_uom: 'kg' });
-      }
-    }
+    if (!isNaN(val) && val > 0) setYield(val);
   };
 
   // Footer totals — effective quantities (post-waste)
@@ -578,9 +530,12 @@ export const RecipeBuilder: React.FC<{ mode?: 'real' | 'test' }> = ({ mode = 're
   };
 
   const formulaLabel = (f: typeof formulas[number]) => {
-    const suffix    = ` (×${f.wholesale_multiplier} / ×${f.retail_multiplier})`;
+    // Show the actual formula expression (falls back to the multiplier for
+    // legacy rows that have no expression).
+    const ws = f.wholesale_formula || `cost * ${f.wholesale_multiplier}`;
+    const rt = f.retail_formula    || `cost * ${f.retail_multiplier}`;
     const defaultTag = f.is_default ? ' [default]' : '';
-    return `${f.name}${defaultTag}${suffix}`;
+    return `${f.name}${defaultTag} — ${ws} / ${rt}`;
   };
 
   return (
@@ -623,28 +578,6 @@ export const RecipeBuilder: React.FC<{ mode?: 'real' | 'test' }> = ({ mode = 're
           {t.finalProductOption}
         </button>
       </div>
-
-      {/* ── Final product: start from a base recipe ──────────── */}
-      {recipeType === 'final' && (
-        <div className="recipe-builder__base-picker">
-          <label className="recipe-builder__base-label">
-            <span>{t.startFromBase}</span>
-            <select
-              className="recipe-builder__base-select"
-              value=""
-              onChange={(e) => { const id = parseInt(e.target.value, 10); if (id) handlePickBaseRecipe(id); e.target.value = ''; }}
-            >
-              <option value="">{t.pickBaseRecipe}</option>
-              {baseRecipes.map((b) => (
-                <option key={b.item_id} value={b.item_id}>
-                  {b.recipe_name}{b.reference_code ? ` (${b.reference_code})` : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p className="recipe-builder__base-hint">{t.baseRecipeHint}</p>
-        </div>
-      )}
 
       {/* ── Header: 4 equal-width fields ─────────────────────── */}
       <div className="recipe-builder__header">
@@ -702,6 +635,16 @@ export const RecipeBuilder: React.FC<{ mode?: 'real' | 'test' }> = ({ mode = 're
             aria-invalid={fieldErrors.yieldKg}
           />
         </label>
+
+        {recipeType === 'final' && (
+          <label className="recipe-builder__field">
+            <span>{t.saleUomLabel}</span>
+            <select value={saleUom} onChange={(e) => setSaleUom(e.target.value === 'unit' ? 'unit' : 'kg')}>
+              <option value="kg">{t.saleUomKg}</option>
+              <option value="unit">{t.saleUomUnit}</option>
+            </select>
+          </label>
+        )}
 
         {recipeType === 'final' && (
           <label className="recipe-builder__field">
@@ -897,6 +840,7 @@ export const RecipeBuilder: React.FC<{ mode?: 'real' | 'test' }> = ({ mode = 're
         laborCost={laborCost}
         overheadCost={overheadCost}
         showPricing={recipeType === 'final'}
+        saleUom={recipeType === 'final' ? saleUom : 'kg'}
       />
 
       {/* ── P3-3: Live Cost Preview strip ─────────────────────── */}

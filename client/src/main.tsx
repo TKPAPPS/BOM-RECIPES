@@ -23,21 +23,19 @@ import { RecipesPrintPage } from './components/KitchenRecipes/RecipesPrintPage';
 import { TestRecipes } from './components/TestRecipes/TestRecipes';
 import { PendingApproval } from './components/TestRecipes/PendingApproval';
 import { TestRecipeView } from './components/TestRecipes/TestRecipeView';
-import { ManagerRoute } from './components/ManagerRoute';
+import { TabRoute } from './components/TabRoute';
 import { LoginPage } from './pages/LoginPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { AdminRoute } from './components/AdminRoute';
-import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthProvider } from './context/AuthContext';
 import { LanguageProvider } from './context/LanguageContext';
+import { useAllowedTabs } from './hooks/useAllowedTabs';
+import { firstAllowedPath } from './config/tabs';
 
-/** Role-aware landing: manager → Dashboard, admin → Kitchen Recipes,
- *  customer (and anyone else) → Recipe Book. */
+/** Landing tab = the first tab the current role is permitted to see
+ *  (per the manager-configurable role→tabs map). */
 const HomeRedirect: React.FC = () => {
-  const { user } = useAuth();
-  const to = user?.role === 'manager' ? '/dashboard'
-    : user?.role === 'admin' ? '/test-kitchen'
-    : '/book';
-  return <Navigate to={to} replace />;
+  const { allowed } = useAllowedTabs();
+  return <Navigate to={firstAllowedPath(allowed) || '/book'} replace />;
 };
 
 const router = createBrowserRouter(
@@ -66,30 +64,30 @@ const router = createBrowserRouter(
             admin → Kitchen Recipes, customer → Recipe Book. */}
         <Route index element={<HomeRedirect />} />
 
-        {/* Customer + admin routes (Recipe Book) */}
-        <Route path="book"            element={<RecipeBookList />} />
-        <Route path="book/:itemId"    element={<RecipeBookDetail />} />
+        {/* Recipe Book */}
+        <Route path="book"            element={<TabRoute tab="book"><RecipeBookList /></TabRoute>} />
+        <Route path="book/:itemId"    element={<TabRoute tab="book"><RecipeBookDetail /></TabRoute>} />
 
-        {/* Admin-only routes */}
-        <Route path="dashboard"       element={<ManagerRoute><DashboardPage /></ManagerRoute>} />
-        {/* Real recipe management is manager-only (admins use Test Recipes). */}
-        <Route path="recipes"         element={<ManagerRoute><Navigate to="/kitchen" replace /></ManagerRoute>} />
-        <Route path="recipes/base"    element={<ManagerRoute><BomHistory type="base"  /></ManagerRoute>} />
-        <Route path="recipes/final"   element={<ManagerRoute><BomHistory type="final" /></ManagerRoute>} />
-        <Route path="recipes/view/:itemId" element={<ManagerRoute><RecipeAdminView /></ManagerRoute>} />
-        <Route path="kitchen"         element={<ManagerRoute><KitchenRecipes /></ManagerRoute>} />
-        <Route path="recipes/print"   element={<ManagerRoute><RecipesPrintPage /></ManagerRoute>} />
-        <Route path="recipe/new"      element={<ManagerRoute><RecipeBuilder /></ManagerRoute>} />
-        <Route path="recipe/:itemId"  element={<ManagerRoute><RecipeBuilder /></ManagerRoute>} />
-        <Route path="test-kitchen"      element={<AdminRoute><TestRecipes /></AdminRoute>} />
-        <Route path="test-recipe/new"   element={<AdminRoute><RecipeBuilder mode="test" /></AdminRoute>} />
-        <Route path="test-recipe/view/:itemId" element={<AdminRoute><TestRecipeView /></AdminRoute>} />
-        <Route path="test-recipe/:itemId" element={<AdminRoute><RecipeBuilder mode="test" /></AdminRoute>} />
-        <Route path="pending-recipes"   element={<ManagerRoute><PendingApproval /></ManagerRoute>} />
-        <Route path="where-used"      element={<ManagerRoute><WhereUsedPage /></ManagerRoute>} />
-        <Route path="products"        element={<AdminRoute><ProductsPage /></AdminRoute>} />
-        <Route path="settings"        element={<ManagerRoute><SettingsPage /></ManagerRoute>} />
-        <Route path="logs"            element={<ManagerRoute><LogsPage /></ManagerRoute>} />
+        {/* Tab-gated routes — visibility per role is manager-configurable
+            (Settings → Permissions); data ops stay protected server-side. */}
+        <Route path="dashboard"       element={<TabRoute tab="dashboard"><DashboardPage /></TabRoute>} />
+        <Route path="recipes"         element={<TabRoute tab="kitchen"><Navigate to="/kitchen" replace /></TabRoute>} />
+        <Route path="recipes/base"    element={<TabRoute tab="kitchen"><BomHistory type="base"  /></TabRoute>} />
+        <Route path="recipes/final"   element={<TabRoute tab="kitchen"><BomHistory type="final" /></TabRoute>} />
+        <Route path="recipes/view/:itemId" element={<TabRoute tab="kitchen"><RecipeAdminView /></TabRoute>} />
+        <Route path="kitchen"         element={<TabRoute tab="kitchen"><KitchenRecipes /></TabRoute>} />
+        <Route path="recipes/print"   element={<TabRoute tab="kitchen"><RecipesPrintPage /></TabRoute>} />
+        <Route path="recipe/new"      element={<TabRoute tab="kitchen"><RecipeBuilder /></TabRoute>} />
+        <Route path="recipe/:itemId"  element={<TabRoute tab="kitchen"><RecipeBuilder /></TabRoute>} />
+        <Route path="test-kitchen"      element={<TabRoute tab="test"><TestRecipes /></TabRoute>} />
+        <Route path="test-recipe/new"   element={<TabRoute tab="test"><RecipeBuilder mode="test" /></TabRoute>} />
+        <Route path="test-recipe/view/:itemId" element={<TabRoute tab="test"><TestRecipeView /></TabRoute>} />
+        <Route path="test-recipe/:itemId" element={<TabRoute tab="test"><RecipeBuilder mode="test" /></TabRoute>} />
+        <Route path="pending-recipes"   element={<TabRoute tab="pending"><PendingApproval /></TabRoute>} />
+        <Route path="where-used"      element={<TabRoute tab="whereused"><WhereUsedPage /></TabRoute>} />
+        <Route path="products"        element={<TabRoute tab="products"><ProductsPage /></TabRoute>} />
+        <Route path="settings"        element={<TabRoute tab="settings"><SettingsPage /></TabRoute>} />
+        <Route path="logs"            element={<TabRoute tab="logs"><LogsPage /></TabRoute>} />
       </Route>
     </>
   )

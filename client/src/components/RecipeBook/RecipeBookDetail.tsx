@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api';
 import { useLang } from '../../context/LanguageContext';
-import { getImageSrc, fmtQty } from './imageHelpers';
+import { getImageSrc, fmtQty, fmtMoney, CURRENCY_SYMBOL } from './imageHelpers';
 import { RecipeCalculator } from './RecipeCalculator';
 import type { BomDetail, BomLine, CalcIngredient } from '../../types';
 
@@ -293,6 +293,8 @@ const SubRecipeLines: React.FC<{ ingredients: CalcIngredient[]; depth: number }>
             </div>
             <span className="recipe-view__ref">{ing.reference || ''}</span>
             <span className="rb-subrecipe__qty">{fmtQty(ing.scaled_quantity_kg)} kg</span>
+            <span className="rb-subrecipe__num">{ing.cost_per_kg != null ? `${CURRENCY_SYMBOL}${fmtMoney(ing.cost_per_kg)}` : ''}</span>
+            <span className="rb-subrecipe__num">{ing.line_cost != null ? `${CURRENCY_SYMBOL}${fmtMoney(ing.line_cost)}` : ''}</span>
           </div>
           {ing.ingredient_type === 'recipe' && ing.sub_recipe && (
             <SubRecipeLines ingredients={ing.sub_recipe.ingredients} depth={depth + 1} />

@@ -62,8 +62,8 @@ const UNIT_PATTERN = String.raw`(?:` +
   String.raw`grams|gram|gr\.?|g|` +
   // litre variants — longer first so "liter" beats "lt"/"l"
   String.raw`liters|litres|liter|litre|ליטר|lt|l|` +
-  // count variants
-  String.raw`units|unit` +
+  // count variants — Hebrew first, then English
+  String.raw`יחידות|יחידה|units|unit` +
   String.raw`)`;
 
 const NUMBER_PATTERN = String.raw`\d+(?:[.,]\d+)?`;
@@ -82,7 +82,7 @@ const PAIR_RE = new RegExp(
 // the cost is already per unit, so the divisor is 1.  Only consulted
 // when no numbered pair matched in any family.
 const BARE_UNIT_RE = new RegExp(
-  String.raw`(?<![\p{L}\p{N}])units?(?![\p{L}\p{N}])`,
+  String.raw`(?<![\p{L}\p{N}])(?:units?|יחידות|יחידה)(?![\p{L}\p{N}])`,
   'iu'
 );
 
@@ -106,7 +106,8 @@ function classifyUnit(unitToken) {
   if (t === 'l' || t === 'lt' || t === 'liter' || t === 'liters'
       || t === 'litre' || t === 'litres' || t === 'ליטר') return 'l';
 
-  if (t === 'unit' || t === 'units') return 'unit';
+  if (t === 'unit' || t === 'units'
+      || unitToken === 'יחידה' || unitToken === 'יחידות') return 'unit';
 
   return null;
 }
@@ -168,8 +169,41 @@ function extractWeightFromName(name) {
   return null;
 }
 
+/**
+ * Extract ONLY a count ("<number> unit/units/יחידה/יחידות", or a bare
+ * unit token) from a product name — ignoring any weight/volume in the
+ * name.  Used for per-unit products where a "4.2 lt" / "500 g" in the
+ * name describes packaging capacity, not divisible content, so only an
+ * explicit unit COUNT should divide the cost.
+ *
+ * @returns {{ grams: number, unit: 'unit', measure: 'count' } | null}
+ *          grams = count × 1000 so rawCost / (grams/1000) === price/unit.
+ */
+function extractCountFromName(name) {
+  if (!name || typeof name !== 'string') return null;
+
+  const counts = [];
+  for (const m of name.matchAll(PAIR_RE)) {
+    const value = parseNumber(m[1]);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    if (classifyUnit(m[2]) === 'unit') counts.push(value);
+  }
+  if (counts.length) {
+    const unique = new Set(counts);
+    if (unique.size > 1) return null;             // ambiguous count
+    return { grams: counts[0] * 1000, unit: 'unit', measure: 'count' };
+  }
+
+  // Bare "unit" / "units" / "יחידה" with no number → 1 unit (divide by 1).
+  if (BARE_UNIT_RE.test(name)) {
+    return { grams: 1000, unit: 'unit', measure: 'count' };
+  }
+  return null;
+}
+
 module.exports = {
   extractWeightFromName,
+  extractCountFromName,
   // Exported for testing only
   _internal: { PAIR_RE, BARE_UNIT_RE, classifyUnit, parseNumber },
 };

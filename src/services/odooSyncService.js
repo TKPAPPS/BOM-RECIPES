@@ -289,7 +289,12 @@ function buildProductRow(p, heMap, archived) {
   const hasOdoo = Number.isFinite(odooKg) && odooKg > 0;
   // Auto-resolved cost (no manual overrides here — those are applied
   // at read time and preserved across syncs via cost_overridden).
-  const c = resolveProductCost({ name: p.name, rawCost, odooWeightKg: p.weight });
+  const c = resolveProductCost({
+    name: p.name,
+    rawCost,
+    odooWeightKg: p.weight,
+    uom: p.uom_id ? p.uom_id[1] : null,
+  });
 
   // Image guard: Odoo returns Python False (→ JS false), empty string, or
   // a base64 PNG string.  Only store it when it looks like real image data.

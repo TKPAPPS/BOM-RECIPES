@@ -49,6 +49,7 @@ app.use('/api/sync',       authMiddleware, pricesMiddleware, require('./routes/s
 app.use('/api/categories', authMiddleware, pricesMiddleware, require('./routes/categories'));
 app.use('/api/users',      authMiddleware, pricesMiddleware, require('./routes/users'));
 app.use('/api/audit-logs', authMiddleware, pricesMiddleware, require('./routes/auditLogs'));
+app.use('/api/role-permissions', authMiddleware, pricesMiddleware, require('./routes/rolePermissions'));
 
 // ── Error handler (must be last) ─────────────────────────────────────────────
 app.use(errorHandler);

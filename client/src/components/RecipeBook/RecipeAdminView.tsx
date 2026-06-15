@@ -336,8 +336,8 @@ export const RecipeAdminView: React.FC = () => {
           <div className="recipe-view__price-grid">
             {hasCostPerKg && (
               <div className="recipe-view__price-card">
-                <div className="recipe-view__price-label">{t.costPerKg}</div>
-                <div className="recipe-view__price-value">{money(detail.cost_per_kg)}</div>
+                <div className="recipe-view__price-label">{detail.sale_uom === 'unit' ? t.costPerUnit : t.costPerKg}</div>
+                <div className="recipe-view__price-value">{detail.sale_uom === 'unit' ? money(summary?.total_cost ?? detail.cost_per_kg) : money(detail.cost_per_kg)}</div>
               </div>
             )}
             {hasTotalCost && (

@@ -49,10 +49,12 @@ async function saveRecipeBom(client, payload, userId) {
     servings_count = null,
     total_weight = null,
     pricing_formula_id = null,
+    sale_uom = 'kg',
     steps = null,
   } = payload;
 
   const safeRecipeType = recipe_type === 'final' ? 'final' : 'base';
+  const safeSaleUom    = sale_uom === 'unit' ? 'unit' : 'kg';
   const safeAllergens  = Array.isArray(allergens) ? allergens : [];
 
   // ── Validation (mirrors the inline guards the route used to run) ──
@@ -139,8 +141,8 @@ async function saveRecipeBom(client, payload, userId) {
                        labor_cost, overhead_cost, packaging_cost, recipe_type,
                        full_name, description, allergens, is_spicy,
                        serving_suggestion, servings_count, total_weight,
-                       pricing_formula_id, created_by, updated_by)
-     VALUES ($1, $2, $3, NULL, 1, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $16)
+                       pricing_formula_id, sale_uom, created_by, updated_by)
+     VALUES ($1, $2, $3, NULL, 1, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $17, $16, $16)
      ON CONFLICT (item_id) DO UPDATE
        SET yield_kg            = EXCLUDED.yield_kg,
            reference_code      = EXCLUDED.reference_code,
@@ -156,6 +158,7 @@ async function saveRecipeBom(client, payload, userId) {
            servings_count      = EXCLUDED.servings_count,
            total_weight        = EXCLUDED.total_weight,
            pricing_formula_id  = EXCLUDED.pricing_formula_id,
+           sale_uom            = EXCLUDED.sale_uom,
            updated_by          = EXCLUDED.updated_by,
            version             = boms.version + 1,
            is_active           = TRUE,
@@ -173,6 +176,7 @@ async function saveRecipeBom(client, payload, userId) {
       total_weight   ? parseFloat(total_weight) : null,
       pricing_formula_id ? parseInt(pricing_formula_id) : null,
       userId,
+      safeSaleUom,
     ]
   );
 

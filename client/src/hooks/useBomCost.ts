@@ -1,5 +1,17 @@
 import { useMemo } from 'react';
 import type { IngredientLine, CostTier } from '../types';
+import { evalFormula } from '../utils/formulaEval';
+
+/** Price for a cost: evaluate the formula (exact, incl. rounding) if set, else cost × multiplier. */
+function priceFor(formula: string | null | undefined, multiplier: number, cost: number): number {
+  if (formula) {
+    try {
+      const v = evalFormula(formula, { cost });
+      if (Number.isFinite(v)) return v;
+    } catch { /* fall back to multiplier */ }
+  }
+  return cost * multiplier;
+}
 
 /**
  * Derives all pricing tiers from client-side data including waste and production costs.
@@ -21,6 +33,8 @@ export function useBomCost(
   laborCost: number,
   overheadCost: number,
   packagingCost: number = 0,
+  wholesaleFormula: string | null = null,
+  retailFormula: string | null = null,
 ): CostTier | null {
   return useMemo(() => {
     const n = (v: unknown): number => {
@@ -55,8 +69,8 @@ export function useBomCost(
       cost_for_yield:      materialCost,
       production_cost:     productionCost,
       total_cost:          totalCost,
-      wholesale_for_yield: totalCost * wsMult,
-      retail_for_yield:    totalCost * rtMult,
+      wholesale_for_yield: priceFor(wholesaleFormula, wsMult, totalCost),
+      retail_for_yield:    priceFor(retailFormula,    rtMult, totalCost),
     };
-  }, [lines, yieldKg, wholesaleMultiplier, retailMultiplier, laborCost, overheadCost, packagingCost]);
+  }, [lines, yieldKg, wholesaleMultiplier, retailMultiplier, laborCost, overheadCost, packagingCost, wholesaleFormula, retailFormula]);
 }

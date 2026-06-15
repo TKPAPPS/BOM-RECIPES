@@ -7,8 +7,37 @@ const {
   fetchDefaultFormula,
   fetchFormulaByUid,
 } = require('../services/pricingService');
+const { multiplierFromFormula } = require('../utils/formulaEval');
 
 const router = express.Router();
+
+/**
+ * Resolve one tier from the request body.  A non-empty `formula` string
+ * wins (validated; its value at cost=1 becomes the stored multiplier so
+ * the multiplier-based engine keeps working).  Otherwise fall back to a
+ * plain multiplier and synthesise an equivalent "cost * N" formula.
+ * Throws an Error with .status=400 on invalid input.
+ */
+function resolveTier(formula, multiplier, tierName) {
+  const expr = (formula ?? '').toString().trim();
+  if (expr) {
+    try {
+      const m = multiplierFromFormula(expr);
+      return { multiplier: m, formula: expr };
+    } catch (e) {
+      const err = new Error(`Invalid ${tierName} formula: ${e.message}`);
+      err.status = 400;
+      throw err;
+    }
+  }
+  const mult = parseFloat(multiplier);
+  if (!(mult > 0)) {
+    const err = new Error(`${tierName} needs a positive multiplier or a formula`);
+    err.status = 400;
+    throw err;
+  }
+  return { multiplier: mult, formula: `cost * ${mult}` };
+}
 
 // Hardcoded last-resort default for the resolve endpoint when no
 // active default formula exists in the DB.  Matches the resolver's
@@ -65,6 +94,8 @@ router.get('/resolve', async (req, res) => {
         return res.json({
           wholesale_multiplier: result.wholesale_multiplier,
           retail_multiplier:    result.retail_multiplier,
+          wholesale_formula:    result.wholesale_formula,
+          retail_formula:       result.retail_formula,
           formula:              result.formula,
           selection:            result.selection,
           cost_per_kg:          result.cost_per_kg,
@@ -112,7 +143,9 @@ router.get('/', requireAdmin, async (_req, res) => {
       MAX(name)                                                              AS name,
       bool_or(is_default)                                                    AS is_default,
       MAX(CASE WHEN price_tier = 'wholesale' THEN multiplier END)::float     AS wholesale_multiplier,
-      MAX(CASE WHEN price_tier = 'retail'    THEN multiplier END)::float     AS retail_multiplier
+      MAX(CASE WHEN price_tier = 'retail'    THEN multiplier END)::float     AS retail_multiplier,
+      MAX(CASE WHEN price_tier = 'wholesale' THEN formula_expr END)          AS wholesale_formula,
+      MAX(CASE WHEN price_tier = 'retail'    THEN formula_expr END)          AS retail_formula
     FROM   pricing_formulas
     WHERE  is_active   = TRUE
       AND  formula_uid IS NOT NULL
@@ -130,15 +163,18 @@ router.get('/', requireAdmin, async (_req, res) => {
 // is_default is always FALSE on create; use POST /:id/default to set.
 router.post('/', requireAdmin, async (req, res) => {
   const name = (req.body?.name ?? '').toString().trim();
-  const wholesale = parseFloat(req.body?.wholesale_multiplier);
-  const retail    = parseFloat(req.body?.retail_multiplier);
-
   if (!name) {
     return res.status(400).json({ error: 'name is required' });
   }
-  if (!(wholesale > 0) || !(retail > 0)) {
-    return res.status(400).json({ error: 'wholesale_multiplier and retail_multiplier must be positive numbers' });
+  let w, r;
+  try {
+    w = resolveTier(req.body?.wholesale_formula, req.body?.wholesale_multiplier, 'Wholesale');
+    r = resolveTier(req.body?.retail_formula,    req.body?.retail_multiplier,    'Retail');
+  } catch (e) {
+    return res.status(e.status || 400).json({ error: e.message });
   }
+  const wholesale = w.multiplier;
+  const retail    = r.multiplier;
 
   const client = await pool.connect();
   try {
@@ -154,16 +190,16 @@ router.post('/', requireAdmin, async (req, res) => {
     // consults them — the formula_uid is the real identity now.
     const { rows: [wRow] } = await client.query(
       `INSERT INTO pricing_formulas
-         (scope, scope_ref_id, price_tier, multiplier, name, formula_uid, is_default)
-       VALUES ('global', NULL, 'wholesale', $1, $2, $3, FALSE)
+         (scope, scope_ref_id, price_tier, multiplier, formula_expr, name, formula_uid, is_default)
+       VALUES ('global', NULL, 'wholesale', $1, $2, $3, $4, FALSE)
        RETURNING id`,
-      [wholesale, name, uid]
+      [wholesale, w.formula, name, uid]
     );
     await client.query(
       `INSERT INTO pricing_formulas
-         (scope, scope_ref_id, price_tier, multiplier, name, formula_uid, is_default)
-       VALUES ('global', NULL, 'retail', $1, $2, $3, FALSE)`,
-      [retail, name, uid]
+         (scope, scope_ref_id, price_tier, multiplier, formula_expr, name, formula_uid, is_default)
+       VALUES ('global', NULL, 'retail', $1, $2, $3, $4, FALSE)`,
+      [retail, r.formula, name, uid]
     );
 
     await logAudit(
@@ -188,6 +224,8 @@ router.post('/', requireAdmin, async (req, res) => {
       name,
       wholesale_multiplier: wholesale,
       retail_multiplier:    retail,
+      wholesale_formula:    w.formula,
+      retail_formula:       r.formula,
       is_default:           false,
     });
   } catch (err) {
@@ -207,15 +245,18 @@ router.put('/:id', requireAdmin, async (req, res) => {
   if (!tierRowId) return res.status(400).json({ error: 'invalid id' });
 
   const name = (req.body?.name ?? '').toString().trim();
-  const wholesale = parseFloat(req.body?.wholesale_multiplier);
-  const retail    = parseFloat(req.body?.retail_multiplier);
-
   if (!name) {
     return res.status(400).json({ error: 'name is required' });
   }
-  if (!(wholesale > 0) || !(retail > 0)) {
-    return res.status(400).json({ error: 'wholesale_multiplier and retail_multiplier must be positive numbers' });
+  let w, r;
+  try {
+    w = resolveTier(req.body?.wholesale_formula, req.body?.wholesale_multiplier, 'Wholesale');
+    r = resolveTier(req.body?.retail_formula,    req.body?.retail_multiplier,    'Retail');
+  } catch (e) {
+    return res.status(e.status || 400).json({ error: e.message });
   }
+  const wholesale = w.multiplier;
+  const retail    = r.multiplier;
 
   const client = await pool.connect();
   try {
@@ -235,17 +276,22 @@ router.put('/:id', requireAdmin, async (req, res) => {
 
     await client.query(
       `UPDATE pricing_formulas
-       SET    multiplier = CASE price_tier
-                              WHEN 'wholesale' THEN $1
-                              WHEN 'retail'    THEN $2
-                              ELSE multiplier
-                            END,
-              name       = $3,
-              updated_at = NOW()
+       SET    multiplier   = CASE price_tier
+                               WHEN 'wholesale' THEN $1
+                               WHEN 'retail'    THEN $2
+                               ELSE multiplier
+                             END,
+              formula_expr = CASE price_tier
+                               WHEN 'wholesale' THEN $5
+                               WHEN 'retail'    THEN $6
+                               ELSE formula_expr
+                             END,
+              name         = $3,
+              updated_at   = NOW()
        WHERE  formula_uid = $4
          AND  is_active   = TRUE
          AND  price_tier IN ('wholesale', 'retail')`,
-      [wholesale, retail, name, uid]
+      [wholesale, retail, name, uid, w.formula, r.formula]
     );
 
     const after = await fetchFormulaByUid(client, uid);

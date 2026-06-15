@@ -7,9 +7,12 @@ import { FormulaManager } from './components/FormulaManager/FormulaManager';
 import { UserManagementPanel } from './components/Settings/UserManagementPanel';
 import { OdooSyncPanel } from './components/Settings/OdooSyncPanel';
 import { ReferenceCodesPanel } from './components/Settings/ReferenceCodesPanel';
+import { RolePermissionsPanel } from './components/Settings/RolePermissionsPanel';
 import { ToastContainer } from './components/Toast/Toast';
 import { RecipeImportModal } from './components/RecipeIO/RecipeImportModal';
 import { LanguageProvider, useLang } from './context/LanguageContext';
+import { useAllowedTabs } from './hooks/useAllowedTabs';
+import type { TabKey } from './config/tabs';
 import { useAuth } from './context/AuthContext';
 import { useRecipeStore } from './stores/useRecipeStore';
 import { useToastStore } from './stores/useToastStore';
@@ -1011,7 +1014,7 @@ const RecipeIOToolbar: React.FC<RecipeIOToolbarProps> = ({
 /* ── Settings Page ──────────────────────────────────────────── */
 export const SettingsPage: React.FC = () => {
   const { t } = useLang();
-  const [tab, setTab] = useState<'formulas' | 'users' | 'sync' | 'refcodes'>('formulas');
+  const [tab, setTab] = useState<'formulas' | 'users' | 'sync' | 'refcodes' | 'permissions'>('formulas');
 
   return (
     <div className="settings-page">
@@ -1048,6 +1051,14 @@ export const SettingsPage: React.FC = () => {
         >
           {t.settingsTabRefCodes}
         </button>
+        <button
+          role="tab"
+          aria-selected={tab === 'permissions'}
+          className={`settings-page__tab ${tab === 'permissions' ? 'settings-page__tab--active' : ''}`}
+          onClick={() => setTab('permissions')}
+        >
+          {t.settingsTabPermissions}
+        </button>
       </div>
 
       <div className="settings-page__body">
@@ -1055,6 +1066,7 @@ export const SettingsPage: React.FC = () => {
         {tab === 'users'    && <UserManagementPanel />}
         {tab === 'sync'     && <OdooSyncPanel />}
         {tab === 'refcodes' && <ReferenceCodesPanel />}
+        {tab === 'permissions' && <RolePermissionsPanel />}
       </div>
     </div>
   );
@@ -1066,16 +1078,13 @@ const AppInner: React.FC = () => {
   const { user, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
 
-  // Nav items are tagged with `adminOnly` so the renderer below can
-  // hide admin entries for customer accounts.  The client-side gate
-  // is cosmetic — server enforcement (STEP 2) is the real policy.
-  // 'manager' is a privileged superset of admin → sees all admin nav.
-  const isManager = user?.role === 'manager';
-  const isAdmin = user?.role === 'admin' || isManager;
+  // Which sidebar tabs this role may see — manager-configurable
+  // (Settings → Permissions), with historical defaults as fallback.
+  const { allowed } = useAllowedTabs();
 
-  const NAV_ITEMS: Array<{ to: string; label: string; end: boolean; icon: React.ReactNode; adminOnly?: boolean; managerOnly?: boolean }> = [
+  const ALL_NAV: Array<{ key: TabKey; to: string; label: string; end: boolean; icon: React.ReactNode }> = [
     {
-      to: '/dashboard', label: t.dashboard, end: true, managerOnly: true,
+      key: 'dashboard', to: '/dashboard', label: t.dashboard, end: true,
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect x="3" y="3" width="7" height="9"/>
@@ -1086,7 +1095,7 @@ const AppInner: React.FC = () => {
       ),
     },
     {
-      to: '/book', label: t.recipeBook, end: false,
+      key: 'book', to: '/book', label: t.recipeBook, end: false,
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
@@ -1095,7 +1104,7 @@ const AppInner: React.FC = () => {
       ),
     },
     {
-      to: '/kitchen', label: t.kitchenRecipes, end: false, managerOnly: true,
+      key: 'kitchen', to: '/kitchen', label: t.kitchenRecipes, end: false,
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -1104,7 +1113,7 @@ const AppInner: React.FC = () => {
       ),
     },
     {
-      to: '/test-kitchen', label: t.testRecipes, end: false, adminOnly: true,
+      key: 'test', to: '/test-kitchen', label: t.testRecipes, end: false,
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M9 3h6v2l-1 1v4l4 8a2 2 0 0 1-2 3H8a2 2 0 0 1-2-3l4-8V6L9 5z"/>
@@ -1113,7 +1122,7 @@ const AppInner: React.FC = () => {
       ),
     },
     {
-      to: '/pending-recipes', label: t.pendingApproval, end: false, managerOnly: true,
+      key: 'pending', to: '/pending-recipes', label: t.pendingApproval, end: false,
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="9"/>
@@ -1122,7 +1131,7 @@ const AppInner: React.FC = () => {
       ),
     },
     {
-      to: '/where-used', label: t.whereUsed, end: true, managerOnly: true,
+      key: 'whereused', to: '/where-used', label: t.whereUsed, end: true,
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <circle cx="18" cy="5" r="3"/>
@@ -1134,7 +1143,7 @@ const AppInner: React.FC = () => {
       ),
     },
     {
-      to: '/products', label: t.products, end: true, adminOnly: true,
+      key: 'products', to: '/products', label: t.products, end: true,
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M20.5 7.27L12 12 3.5 7.27"/>
@@ -1144,7 +1153,7 @@ const AppInner: React.FC = () => {
       ),
     },
     {
-      to: '/settings', label: t.settings, end: true, managerOnly: true,
+      key: 'settings', to: '/settings', label: t.settings, end: true,
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
@@ -1157,7 +1166,7 @@ const AppInner: React.FC = () => {
       ),
     },
     {
-      to: '/logs', label: t.logs, end: true, managerOnly: true,
+      key: 'logs', to: '/logs', label: t.logs, end: true,
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -1168,7 +1177,9 @@ const AppInner: React.FC = () => {
         </svg>
       ),
     },
-  ].filter((item) => (item.managerOnly ? isManager : (!item.adminOnly || isAdmin)));
+  ];
+
+  const NAV_ITEMS = ALL_NAV.filter((item) => allowed.has(item.key));
 
   return (
     <div className="app">

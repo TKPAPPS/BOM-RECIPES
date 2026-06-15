@@ -8,11 +8,15 @@ interface RecipeState {
   referenceCode: string;
   yieldKg: number;
   recipeType: RecipeType;
+  saleUom: 'kg' | 'unit';
   lines: IngredientLine[];
   /** Preparation steps (Kitchen Recipes). Every line belongs to one step. */
   steps: RecipeStepDraft[];
   wholesaleMultiplier: number;
   retailMultiplier: number;
+  /** Active formula expressions for the live preview (exact, incl. rounding). */
+  wholesaleFormula: string | null;
+  retailFormula: string | null;
   pricingFormulaId: number | null;
   // P2-3: per-batch production costs
   laborCost: number;
@@ -44,7 +48,8 @@ interface RecipeState {
   setReferenceCode: (code: string) => void;
   setYield: (kg: number) => void;
   setRecipeType: (type: RecipeType) => void;
-  setMultipliers: (wholesale: number, retail: number) => void;
+  setSaleUom: (v: 'kg' | 'unit') => void;
+  setMultipliers: (wholesale: number, retail: number, wholesaleFormula?: string | null, retailFormula?: string | null) => void;
   setPricingFormulaId: (id: number | null) => void;
   setLaborCost: (v: number) => void;
   setOverheadCost: (v: number) => void;
@@ -71,6 +76,7 @@ interface RecipeState {
       referenceCode: string;
       yieldKg: number;
       recipeType?: RecipeType;
+      saleUom?: 'kg' | 'unit';
       laborCost?: number;
       overheadCost?: number;
       packagingCost?: number;
@@ -95,6 +101,7 @@ interface RecipeState {
       referenceCode: string;
       yieldKg: number;
       recipeType?: RecipeType;
+      saleUom?: 'kg' | 'unit';
       laborCost?: number;
       overheadCost?: number;
       packagingCost?: number;
@@ -146,10 +153,13 @@ const initialState = (mode: 'real' | 'test' = 'real') => {
     referenceCode: '',
     yieldKg: 1,
     recipeType: 'base' as RecipeType,
+    saleUom: 'kg' as 'kg' | 'unit',
     // Preparation steps are OPTIONAL instructions — start with none.
     steps: [] as RecipeStepDraft[],
     lines: [emptyLine()],
     wholesaleMultiplier: 2.5,
+    wholesaleFormula: null as string | null,
+    retailFormula: null as string | null,
     retailMultiplier: 5.0,
     pricingFormulaId: null as number | null,
     laborCost: 0,
@@ -171,7 +181,8 @@ export const useRecipeStore = create<RecipeState>()(
       setReferenceCode:    (code) => set({ referenceCode: code, isDirty: true }),
       setYield:            (kg)   => set({ yieldKg: kg, isDirty: true }),
       setRecipeType:       (type) => set({ recipeType: type, isDirty: true }),
-      setMultipliers:      (wholesale, retail) => set({ wholesaleMultiplier: wholesale, retailMultiplier: retail }),
+      setSaleUom:          (v)    => set({ saleUom: v, isDirty: true }),
+      setMultipliers:      (wholesale, retail, wf = null, rf = null) => set({ wholesaleMultiplier: wholesale, retailMultiplier: retail, wholesaleFormula: wf, retailFormula: rf }),
       setPricingFormulaId: (id)   => set({ pricingFormulaId: id, isDirty: true }),
       setLaborCost:        (v)    => set({ laborCost: v, isDirty: true }),
       setOverheadCost:     (v)    => set({ overheadCost: v, isDirty: true }),
@@ -224,6 +235,7 @@ export const useRecipeStore = create<RecipeState>()(
           referenceCode:     bom.referenceCode,
           yieldKg:           bom.yieldKg,
           recipeType:        bom.recipeType ?? 'base',
+          saleUom:           bom.saleUom ?? 'kg',
           laborCost:         bom.laborCost     ?? 0,
           overheadCost:      bom.overheadCost  ?? 0,
           packagingCost:     bom.packagingCost ?? 0,
@@ -250,6 +262,7 @@ export const useRecipeStore = create<RecipeState>()(
           referenceCode:     bom.referenceCode,
           yieldKg:           bom.yieldKg,
           recipeType:        bom.recipeType ?? 'base',
+          saleUom:           bom.saleUom ?? 'kg',
           laborCost:         bom.laborCost     ?? 0,
           overheadCost:      bom.overheadCost  ?? 0,
           packagingCost:     bom.packagingCost ?? 0,
@@ -292,6 +305,7 @@ export const useRecipeStore = create<RecipeState>()(
               referenceCode:     state.referenceCode,
               yieldKg:           state.yieldKg,
               recipeType:        state.recipeType,
+              saleUom:           state.saleUom,
               steps:             state.steps,
               lines:             state.lines,
               pricingFormulaId:  state.pricingFormulaId,
