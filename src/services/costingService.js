@@ -242,21 +242,109 @@ async function buildCalculationOrder() {
   return order;
 }
 
+// Flat (non-recursive) cost for ONE recipe using its direct lines.  Safe
+// to use in a topological pass because every sub-recipe it consumes has
+// already had its items.cost_per_kg updated earlier in the same pass.
+// Reads ingredient costs straight from items (so manual product overrides
+// are honoured) — never recomputes raw materials.
+const Q_BOM_FLAT = `
+  SELECT b.id AS bom_id, b.yield_kg, b.recipe_type,
+         b.labor_cost, b.overhead_cost, b.packaging_cost,
+         l.id AS line_id, l.ingredient_item_id, l.quantity_kg, l.waste_pct,
+         ing.cost_per_kg AS ing_cost,
+         COALESCE(ing.name_en, ing.name) AS ing_name
+  FROM   boms b
+  LEFT JOIN bom_lines l ON l.bom_id = b.id
+  LEFT JOIN items ing   ON ing.id = l.ingredient_item_id
+  WHERE  b.item_id = $1 AND b.is_active = TRUE
+`;
+
+async function recalcOnePass(itemId, client) {
+  const { rows } = await client.query(Q_BOM_FLAT, [itemId]);
+  if (!rows.length) throw new Error(`Recipe (id ${itemId}) has no active BOM`);
+
+  const head = rows[0];
+  const yieldKg = parseFloat(head.yield_kg);
+
+  let materialCost = 0;
+  const ids = [], snaps = [], costs = [];
+  for (const l of rows) {
+    if (l.line_id == null) continue;            // BOM with no lines
+    if (l.ing_cost == null)
+      throw new Error(`Ingredient "${l.ing_name}" (id ${l.ingredient_item_id}) has no cost_per_kg`);
+    const ingCost     = parseFloat(l.ing_cost);
+    const wastePct    = parseFloat(l.waste_pct) || 0;
+    const effectiveQty = parseFloat(l.quantity_kg) / (1 - wastePct / 100);
+    const lineCost    = effectiveQty * ingCost;
+    materialCost += lineCost;
+    ids.push(l.line_id); snaps.push(ingCost); costs.push(lineCost);
+  }
+
+  const totalCost = materialCost
+    + parseFloat(head.labor_cost || 0)
+    + parseFloat(head.overhead_cost || 0)
+    + parseFloat(head.packaging_cost || 0);
+  const costPerKg = totalCost / yieldKg;
+
+  // Batch-refresh the per-line snapshots in one round-trip.
+  if (ids.length) {
+    await client.query(
+      `UPDATE bom_lines AS bl SET price_per_kg_snapshot = u.snap, line_cost = u.lc
+       FROM (SELECT unnest($1::int[]) AS id, unnest($2::numeric[]) AS snap, unnest($3::numeric[]) AS lc) u
+       WHERE bl.id = u.id`,
+      [ids, snaps, costs]
+    );
+  }
+
+  await client.query(Q_UPDATE_COST, [costPerKg, itemId]);
+
+  let wholesalePrice = null, retailPrice = null;
+  if (head.recipe_type === 'final') {
+    try {
+      const pricing = await resolvePricingForItem(itemId, client);
+      wholesalePrice = pricing.wholesale_price ?? null;
+      retailPrice    = pricing.retail_price    ?? null;
+    } catch (err) {
+      console.warn(`[costing] price refresh skipped for item ${itemId}:`, err.message);
+    }
+  }
+  await client.query(Q_UPDATE_BOM, [costPerKg, totalCost, wholesalePrice, retailPrice, head.bom_id]);
+
+  return costPerKg;
+}
+
 /**
- * Recalculate all active recipes in dependency order.
- * Leaves raw materials untouched (their cost comes from Odoo).
+ * Recalculate ALL active recipes (base AND final) in dependency order.
+ * Single topological pass — each recipe is costed once from its direct
+ * lines (children already updated earlier in the pass), so it is fast
+ * even over a remote DB.  Raw materials are never touched, so manual
+ * product cost overrides are preserved.  A failing recipe (e.g. a broken
+ * sub-recipe) is skipped via a SAVEPOINT and reported, without aborting
+ * the rest.
  */
 async function recalculateAll() {
   const order = await buildCalculationOrder();
-
+  const client = await pool.connect();
   const results = [];
-  for (const id of order) {
-    try {
-      const r = await recalculateItem(id);
-      results.push({ ...r, ok: true });
-    } catch (err) {
-      results.push({ itemId: id, ok: false, error: err.message });
+  try {
+    await client.query('BEGIN');
+    for (const id of order) {
+      await client.query('SAVEPOINT sp');
+      try {
+        const cost = await recalcOnePass(id, client);
+        await client.query('RELEASE SAVEPOINT sp');
+        results.push({ itemId: id, cost_per_kg: cost, ok: true });
+      } catch (err) {
+        await client.query('ROLLBACK TO SAVEPOINT sp');
+        results.push({ itemId: id, ok: false, error: err.message });
+      }
     }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
   }
   return results;
 }

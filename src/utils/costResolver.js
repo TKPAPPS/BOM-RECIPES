@@ -89,19 +89,29 @@ function resolveProductCost(input) {
     weightSource = 'odoo';
     measure      = 'weight';
   } else if (isUnitUom(input.uom)) {
-    // Per-unit product.  Only an explicit COUNT in the name ("50 units",
-    // "6 יחידות") divides the cost → price per unit; a weight/volume in the
-    // name is packaging capacity, not content, so it is ignored.  With no
-    // count token the cost falls through to the per-unit branch below
-    // (costPerKg = raw cost = price for one Odoo unit).
+    // Per-unit product.  Priority for unit products is COUNT > weight >
+    // volume:
+    //   • an explicit COUNT in the name ("50 units", "6 יחידות", or a
+    //     packaging "… 1 Units") → price per unit (and a volume/weight
+    //     alongside a count is treated as packaging capacity → ignored);
+    //   • otherwise a WEIGHT/VOLUME in the name is the content, so divide
+    //     by it → price per kg / per litre (e.g. "Black Sesame 500 gr");
+    //   • nothing parseable → the cost is already per unit (raw cost).
     const cnt = extractCountFromName(input.name);
     if (cnt) {
       weightGrams  = cnt.grams;        // count × 1000 → rawCost/(grams/1000) = per unit
       weightSource = 'name_regex';
       measure      = 'count';
     } else {
-      measure      = 'count';
-      weightSource = 'none';
+      const ext = extractWeightFromName(input.name);   // weight or volume (content)
+      if (ext) {
+        weightGrams  = ext.grams;
+        weightSource = 'name_regex';
+        measure      = ext.measure;
+      } else {
+        measure      = 'count';
+        weightSource = 'none';
+      }
     }
   } else {
     const ext = extractWeightFromName(input.name);
