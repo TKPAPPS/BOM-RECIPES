@@ -60,10 +60,12 @@ const UNIT_PATTERN = String.raw`(?:` +
   // gram variants — Hebrew first (no ambiguity), then English
   String.raw`גרמים|גרם|` +
   String.raw`grams|gram|gr\.?|g|` +
+  // millilitre variants — before the litre group (own "m" prefix)
+  String.raw`milliliters|millilitres|milliliter|millilitre|mls|ml|` +
   // litre variants — longer first so "liter" beats "lt"/"l"
   String.raw`liters|litres|liter|litre|ליטר|lt|l|` +
-  // count variants — Hebrew first, then English
-  String.raw`יחידות|יחידה|units|unit` +
+  // count variants — Hebrew first, then English (incl. "pack")
+  String.raw`יחידות|יחידה|units|unit|packs|pack` +
   String.raw`)`;
 
 const NUMBER_PATTERN = String.raw`\d+(?:[.,]\d+)?`;
@@ -82,7 +84,23 @@ const PAIR_RE = new RegExp(
 // the cost is already per unit, so the divisor is 1.  Only consulted
 // when no numbered pair matched in any family.
 const BARE_UNIT_RE = new RegExp(
-  String.raw`(?<![\p{L}\p{N}])(?:units?|יחידות|יחידה)(?![\p{L}\p{N}])`,
+  String.raw`(?<![\p{L}\p{N}])(?:units?|packs?|יחידות|יחידה)(?![\p{L}\p{N}])`,
+  'iu'
+);
+
+// "per kg" / "by kg" (any case, "kg"/"kilo"/"kilogram") means the cost is
+// ALREADY a per-kilo price → treat the whole product as 1 kg (divisor 1),
+// so cost_per_kg = raw cost.  Highest priority in name extraction.
+const PER_KG_RE = new RegExp(
+  String.raw`(?<![\p{L}\p{N}])(?:per|by)\s*(?:kgs?|kilograms?|kilos?)(?![\p{L}\p{N}])`,
+  'iu'
+);
+
+// A standalone "kg" token (English or Hebrew) — only meaningful as a
+// fallback when the name has NO number at all: then the product is sold
+// by the kilo → treat as 1 kg (cost stays per-kg).
+const BARE_KG_RE = new RegExp(
+  String.raw`(?<![\p{L}\p{N}])(?:kgs?|kilograms?|kilos?|ק["׳'’]?ג|קג)(?![\p{L}\p{N}])`,
   'iu'
 );
 
@@ -103,10 +121,13 @@ function classifyUnit(unitToken) {
   if (t === 'g' || t === 'gr' || t === 'gram' || t === 'grams'
       || t === 'גרם' || t === 'גרמים') return 'g';
 
+  if (t === 'ml' || t === 'mls' || t === 'milliliter' || t === 'millilitre'
+      || t === 'milliliters' || t === 'millilitres') return 'ml';
+
   if (t === 'l' || t === 'lt' || t === 'liter' || t === 'liters'
       || t === 'litre' || t === 'litres' || t === 'ליטר') return 'l';
 
-  if (t === 'unit' || t === 'units'
+  if (t === 'unit' || t === 'units' || t === 'pack' || t === 'packs'
       || unitToken === 'יחידה' || unitToken === 'יחידות') return 'unit';
 
   return null;
@@ -127,6 +148,12 @@ function parseNumber(token) {
 function extractWeightFromName(name) {
   if (!name || typeof name !== 'string') return null;
 
+  // "per kg" / "by kg" → the cost is already per-kilo → treat as 1 kg
+  // (divisor 1), so cost_per_kg = raw cost.  Wins over any parsed number.
+  if (PER_KG_RE.test(name)) {
+    return { grams: 1000, unit: 'kg', measure: 'weight' };
+  }
+
   // Collect matches into measure families so we can apply the
   // weight > volume > count priority below.
   const buckets = { weight: [], volume: [], count: [] };
@@ -143,6 +170,9 @@ function extractWeightFromName(name) {
     } else if (kind === 'l') {
       // grams = litres × 1000 so cost / (grams/1000) === cost per litre
       buckets.volume.push({ grams: value * 1000, unit: 'l', measure: 'volume' });
+    } else if (kind === 'ml') {
+      // 1 ml ≈ 1 g so grams = millilitres → cost / (grams/1000) === per litre
+      buckets.volume.push({ grams: value, unit: 'ml', measure: 'volume' });
     } else if (kind === 'unit') {
       // grams = count × 1000 so cost / (grams/1000) === cost per unit
       buckets.count.push({ grams: value * 1000, unit: 'unit', measure: 'count' });
@@ -159,6 +189,12 @@ function extractWeightFromName(name) {
     const unique = new Set(arr.map((x) => x.grams));
     if (unique.size > 1) return null;             // ambiguous within family
     return arr[0];
+  }
+
+  // Fallback: name has NO number anywhere but says "kg" → sold by the
+  // kilo → treat as 1 kg (cost stays per-kg).  Weight beats a bare unit.
+  if (!/\d/.test(name) && BARE_KG_RE.test(name)) {
+    return { grams: 1000, unit: 'kg', measure: 'weight' };
   }
 
   // Fallback: a bare "unit" / "units" with no number → price per 1 unit.

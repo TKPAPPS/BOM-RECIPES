@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api';
 import { useLang } from '../../context/LanguageContext';
@@ -194,6 +194,41 @@ export const ProductsPage: React.FC = () => {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [includeArchived, setIncludeArchived] = useState(false);
 
+  // ── Resizable columns (drag the divider between headers) ──────────
+  const DEFAULT_W: Record<string, number> = { name: 300, reference: 120, weight: 150, cost: 110, costkg: 140 };
+  const [colW, setColW] = useState<Record<string, number>>(() => {
+    try { const s = localStorage.getItem('products-col-w'); if (s) return { ...DEFAULT_W, ...JSON.parse(s) }; } catch { /* ignore */ }
+    return DEFAULT_W;
+  });
+  const drag = useRef<{ key: string; startX: number; startW: number } | null>(null);
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!drag.current) return;
+      const rtl = document.documentElement.dir === 'rtl';
+      const delta = rtl ? drag.current.startX - e.clientX : e.clientX - drag.current.startX;
+      const w = Math.max(70, drag.current.startW + delta);
+      const key = drag.current.key;
+      setColW((prev) => ({ ...prev, [key]: w }));
+    };
+    const onUp = () => {
+      if (!drag.current) return;
+      drag.current = null;
+      document.body.style.userSelect = '';
+      setColW((prev) => { try { localStorage.setItem('products-col-w', JSON.stringify(prev)); } catch { /* ignore */ } return prev; });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, []);
+  const startResize = (key: string) => (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    drag.current = { key, startX: e.clientX, startW: colW[key] ?? DEFAULT_W[key] };
+    document.body.style.userSelect = 'none';
+  };
+  const Resizer: React.FC<{ col: string }> = ({ col }) => (
+    <span className="col-resizer" onMouseDown={startResize(col)} onClick={(e) => e.stopPropagation()} title={t.productsResizeHint} />
+  );
+
   const { data: products, isLoading, isError, error } = useQuery({
     queryKey: ['products', { includeArchived }],
     queryFn: () => api.getProducts(includeArchived),
@@ -281,26 +316,36 @@ export const ProductsPage: React.FC = () => {
         </label>
       </div>
 
-      <table className="bom-history__table">
+      <div className="products-table-wrap">
+      <table className="bom-history__table products-table--resizable">
+        <colgroup>
+          <col style={{ width: 56 }} />
+          <col style={{ width: colW.name }} />
+          <col style={{ width: colW.reference }} />
+          <col style={{ width: colW.weight }} />
+          <col style={{ width: colW.cost }} />
+          <col style={{ width: colW.costkg }} />
+          <col style={{ width: 72 }} />
+        </colgroup>
         <thead>
           <tr>
-            <th style={{ width: 56 }}>{t.productsColImage}</th>
-            <th onClick={() => onSort('name')} style={{ cursor: 'pointer' }} title={t.productsSortHint}>
-              {t.productsColName}{sortIndicator('name')}
+            <th>{t.productsColImage}</th>
+            <th className="th--resizable" onClick={() => onSort('name')} style={{ cursor: 'pointer' }} title={t.productsSortHint}>
+              {t.productsColName}{sortIndicator('name')}<Resizer col="name" />
             </th>
-            <th onClick={() => onSort('reference')} style={{ cursor: 'pointer' }} title={t.productsSortHint}>
-              {t.refCode}{sortIndicator('reference')}
+            <th className="th--resizable" onClick={() => onSort('reference')} style={{ cursor: 'pointer' }} title={t.productsSortHint}>
+              {t.refCode}{sortIndicator('reference')}<Resizer col="reference" />
             </th>
-            <th className="bom-history__num" onClick={() => onSort('volume_weight')} style={{ cursor: 'pointer' }} title={t.productsSortHint}>
-              {t.productsColWeight}{sortIndicator('volume_weight')}
+            <th className="bom-history__num th--resizable" onClick={() => onSort('volume_weight')} style={{ cursor: 'pointer' }} title={t.productsSortHint}>
+              {t.productsColWeight}{sortIndicator('volume_weight')}<Resizer col="weight" />
             </th>
-            <th className="bom-history__num" onClick={() => onSort('raw_cost')} style={{ cursor: 'pointer' }} title={t.productsSortHint}>
-              {t.productsColCost}{sortIndicator('raw_cost')}
+            <th className="bom-history__num th--resizable" onClick={() => onSort('raw_cost')} style={{ cursor: 'pointer' }} title={t.productsSortHint}>
+              {t.productsColCost}{sortIndicator('raw_cost')}<Resizer col="cost" />
             </th>
-            <th className="bom-history__num" onClick={() => onSort('cost_per_kg')} style={{ cursor: 'pointer' }} title={t.productsSortHint}>
-              {t.productsColCostPerKg}{sortIndicator('cost_per_kg')}
+            <th className="bom-history__num th--resizable" onClick={() => onSort('cost_per_kg')} style={{ cursor: 'pointer' }} title={t.productsSortHint}>
+              {t.productsColCostPerKg}{sortIndicator('cost_per_kg')}<Resizer col="costkg" />
             </th>
-            <th style={{ width: 72 }} />
+            <th />
           </tr>
         </thead>
         <tbody>
@@ -384,6 +429,7 @@ export const ProductsPage: React.FC = () => {
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 };

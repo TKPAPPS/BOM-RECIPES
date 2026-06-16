@@ -1887,6 +1887,44 @@ label {
   padding: 20px 24px;
 }
 
+/* ── Products table: resizable columns ─────────────────────── */
+.products-table-wrap { overflow-x: auto; }
+.products-table--resizable { table-layout: fixed; width: auto; min-width: 100%; }
+.products-table--resizable .bom-history__name {
+  white-space: normal;       /* wrap so the full product name is readable */
+  word-break: break-word;
+}
+.products-table--resizable .bom-history__ref,
+.products-table--resizable .bom-history__num {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.th--resizable { position: relative; }
+.col-resizer {
+  position: absolute;
+  top: 0;
+  inset-inline-end: 0;
+  width: 10px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+  z-index: 3;
+}
+.col-resizer::after {
+  content: '';
+  position: absolute;
+  top: 18%;
+  bottom: 18%;
+  inset-inline-end: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--border);
+  transition: background var(--transition);
+}
+.col-resizer:hover::after { background: var(--gold, #c9a227); width: 3px; }
+
 /* ── Header user link + avatar ─────────────────────────────── */
 .app__user-link {
   display: flex;
