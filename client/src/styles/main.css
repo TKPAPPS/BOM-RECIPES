@@ -1325,6 +1325,25 @@ label {
 .bom-history__th--sortable:hover { color: var(--burgundy); }
 
 /* ── View toggle bar (cards / list) + bulk action bar ───────── */
+/* Pending-approval search bar */
+.kr-searchbar {
+  margin: 10px 0 0;
+}
+.kr-searchbar__input {
+  width: 100%;
+  max-width: 360px;
+}
+
+/* Clickable, sortable table headers (Pending Approval) */
+.th-sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.th-sortable:hover {
+  color: var(--accent, #7a1f2b);
+}
+
 .kr-viewbar {
   display: flex;
   align-items: center;

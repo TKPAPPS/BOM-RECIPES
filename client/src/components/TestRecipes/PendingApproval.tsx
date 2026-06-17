@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, triggerBlobDownload } from '../../api';
 import { useLang } from '../../context/LanguageContext';
 import type { TestRecipeSummary } from '../../types';
 import { useToastStore } from '../../stores/useToastStore';
+
+type SortKey = 'name' | 'reference_code' | 'type' | 'red';
 
 /**
  * Pending Approval — manager review queue with cards / list views, bulk
@@ -20,6 +22,9 @@ export const PendingApproval: React.FC = () => {
 
   const [viewMode, setViewMode] = useState<'cards' | 'list'>('list');
   const [filter, setFilter] = useState<'all' | 'ready' | 'issues'>('all');
+  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
 
@@ -28,10 +33,40 @@ export const PendingApproval: React.FC = () => {
     queryFn: () => api.getTestRecipes('pending'),
   });
 
-  // Ready = no red ingredients (approvable); Issues = has red (needs fix).
-  const filtered = recipes.filter((r) =>
-    filter === 'ready' ? r.red_count === 0 : filter === 'issues' ? r.red_count > 0 : true
-  );
+  // Click a header to sort by it; click the same header again to flip
+  // the direction (A→Z ⇄ Z→A).
+  const onSort = (key: SortKey) => {
+    if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('asc'); }
+  };
+  const sortArrow = (key: SortKey) => (key === sortKey ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
+
+  // Pipeline: status filter → free-text search (name + ref code) → sort.
+  const filtered = useMemo(() => {
+    const byStatus = recipes.filter((r) =>
+      filter === 'ready' ? r.red_count === 0 : filter === 'issues' ? r.red_count > 0 : true
+    );
+    const q = search.trim().toLowerCase();
+    const bySearch = q
+      ? byStatus.filter((r) =>
+          r.name.toLowerCase().includes(q) ||
+          (r.reference_code ?? '').toLowerCase().includes(q))
+      : byStatus;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const val = (r: TestRecipeSummary): string | number => {
+      switch (sortKey) {
+        case 'name': return r.name.toLowerCase();
+        case 'reference_code': return (r.reference_code ?? '').toLowerCase();
+        case 'type': return r.recipe_type === 'final' ? t.finalProductOption : t.baseRecipeOption;
+        case 'red': return r.red_count;
+      }
+    };
+    return [...bySearch].sort((a, b) => {
+      const av = val(a), bv = val(b);
+      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+      return String(av).localeCompare(String(bv)) * dir;
+    });
+  }, [recipes, filter, search, sortKey, sortDir, t]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['test-recipes'] });
@@ -111,6 +146,18 @@ export const PendingApproval: React.FC = () => {
       </div>
       <p className="bom-history__subtitle">{t.pendingApprovalHint}</p>
 
+      {/* Search by recipe name or reference code */}
+      <div className="kr-searchbar">
+        <input
+          type="search"
+          className="input kr-searchbar__input"
+          placeholder={t.rbSearchPlaceholder}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          aria-label={t.rbSearchPlaceholder}
+        />
+      </div>
+
       {/* Toolbar: status filter + bulk bar (when selected) + view toggle */}
       <div className="kr-viewbar">
         <div className="kr-view-toggle pend-filter" role="group" aria-label={t.pendFilterLabel}>
@@ -181,10 +228,10 @@ export const PendingApproval: React.FC = () => {
           <thead>
             <tr>
               <th style={{ width: 36 }}><input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="select all" /></th>
-              <th>{t.recipeName}</th>
-              <th>{t.refCode}</th>
-              <th>{t.recipeTypeLabel}</th>
-              <th className="bom-history__num">{t.testRedColumn}</th>
+              <th className="th-sortable" onClick={() => onSort('name')} title={t.recipeName}>{t.recipeName}{sortArrow('name')}</th>
+              <th className="th-sortable" onClick={() => onSort('reference_code')} title={t.refCode}>{t.refCode}{sortArrow('reference_code')}</th>
+              <th className="th-sortable" onClick={() => onSort('type')} title={t.recipeTypeLabel}>{t.recipeTypeLabel}{sortArrow('type')}</th>
+              <th className="th-sortable bom-history__num" onClick={() => onSort('red')} title={t.testRedColumn}>{t.testRedColumn}{sortArrow('red')}</th>
               <th style={{ width: 200 }} />
             </tr>
           </thead>
