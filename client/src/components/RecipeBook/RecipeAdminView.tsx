@@ -88,7 +88,12 @@ export const RecipeAdminView: React.FC = () => {
   // preserving the right tab via ?tab= so the user lands where they came
   // from instead of the bare /recipes/* route (no tabs).
   const backTo = `/kitchen?tab=${detail.recipe_type === 'base' ? 'base' : 'final'}`;
-  const backLabel = t.kitchenRecipes;
+  // If we arrived from another in-app page (e.g. the parent recipe an
+  // ingredient was clicked from), "back" returns there; otherwise it
+  // goes to the Kitchen Recipes list.
+  const canGoBack = typeof window !== 'undefined' && ((window.history.state?.idx ?? 0) > 0);
+  const goBack = () => (canGoBack ? navigate(-1) : navigate(backTo));
+  const backLabel = canGoBack ? t.back : t.kitchenRecipes;
 
   const fmtDate = (iso: string | undefined) =>
     iso
@@ -188,7 +193,7 @@ export const RecipeAdminView: React.FC = () => {
         <button
           type="button"
           className="recipe-view__back"
-          onClick={() => navigate(backTo)}
+          onClick={goBack}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <line x1="19" y1="12" x2="5" y2="12"/>
