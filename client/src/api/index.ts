@@ -215,6 +215,25 @@ export const api = {
   deleteTestRecipe: (id: number) =>
     del<{ message: string }>(`/test-recipes/${id}`),
 
+  /** Manager-only: promote many pending recipes at once. */
+  bulkPromoteTestRecipes: (ids: number[]) =>
+    post<{ promoted: number; blocked: { id: number; name: string; reason: string }[] }>('/test-recipes/bulk-promote', { ids }),
+
+  bulkDeleteTestRecipes: (ids: number[]) =>
+    post<{ count: number }>('/test-recipes/bulk-delete', { ids }),
+
+  /** Export selected pending recipes to Excel (Blob). */
+  exportTestRecipes: async (ids: number[]): Promise<Blob> => {
+    const res = await fetch(`${BASE}/test-recipes/export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeader() },
+      body: JSON.stringify({ ids }),
+    });
+    if (res.status === 401) handleUnauthorized();
+    if (!res.ok) throw new Error(await res.text());
+    return res.blob();
+  },
+
   /** Manager-only: push a finished test recipe into the real lists. */
   promoteTestRecipe: (id: number) =>
     post<{ item_id: number; recipe_type: RecipeType; message: string }>(

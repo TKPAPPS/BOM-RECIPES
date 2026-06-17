@@ -2002,6 +2002,34 @@ label {
 .profile-err { color: var(--error); font-size: 12.5px; }
 .profile-logout { color: var(--error); border-color: var(--error); }
 
+/* ── Pending Approval: card checkbox + print view ──────────── */
+.kr-card { position: relative; }
+.kr-card__check {
+  position: absolute;
+  top: 8px;
+  inset-inline-start: 8px;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 5px;
+  padding: 2px 3px;
+  line-height: 0;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.kr-card__check input { width: 16px; height: 16px; cursor: pointer; accent-color: var(--burgundy); }
+
+@media screen { .tr-print { max-width: 800px; margin: 0 auto; padding: 24px; } }
+.tr-print__recipe { page-break-after: always; margin-bottom: 28px; }
+.tr-print__recipe:last-child { page-break-after: auto; }
+.tr-print__title { font-size: 20px; color: var(--burgundy); margin: 0 0 4px; }
+.tr-print__meta { color: var(--text-secondary); margin: 0 0 12px; font-size: 13px; }
+.tr-print__table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tr-print__table th, .tr-print__table td { border: 1px solid #ccc; padding: 6px 8px; text-align: start; }
+.tr-print__table th { background: #f4ecd8; }
+.tr-print__steps { margin-top: 14px; }
+.tr-print__steps h2 { font-size: 15px; color: var(--burgundy); margin: 0 0 6px; }
+.tr-print__steps ol { padding-inline-start: 20px; }
+.tr-print__steps li { margin: 4px 0; font-size: 13px; }
+
 /* ── Read-only ingredient page ─────────────────────────────── */
 .ingredient-view__grid {
   display: grid;

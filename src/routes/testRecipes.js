@@ -24,8 +24,12 @@
 const express = require('express');
 const pool    = require('../config/db');
 const { saveRecipeBom } = require('../services/recipeWriteService');
+const { buildExportWorkbook } = require('../services/recipeIOService');
 const { requireAdmin, requireManager } = require('../middleware/authMiddleware');
 const { logAudit, getIp } = require('../services/auditService');
+
+const XLSX_CONTENT_TYPE =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 const router = express.Router();
 
@@ -236,32 +240,22 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   res.json({ message: 'Test recipe deleted' });
 });
 
-// ── POST /:id/promote — MANAGER ONLY ──
-// Re-resolve every ingredient; refuse if any are still red.  Otherwise
-// build a real-recipe payload and reuse saveRecipeBom, then drop the
-// test row.  The new recipe lands in Base or Final per draft.recipe_type.
-router.post('/:id/promote', requireManager, async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid id' });
-
+// Promote ONE test recipe → real recipe.  Returns a status object instead
+// of touching res, so it can back both the single and bulk routes.
+//   { id, name, status: 'promoted'|'blocked'|'failed'|'notfound', ... }
+async function promoteOne(id, userId, ip) {
   const { rows } = await pool.query(`SELECT * FROM test_recipes WHERE id = $1`, [id]);
-  if (!rows.length) return res.status(404).json({ error: 'Test recipe not found' });
+  if (!rows.length) return { id, status: 'notfound' };
   const tr = rows[0];
   const draft = tr.draft || {};
 
   const { lines: annotated, redCount } = await annotateDraft(draft);
   if (redCount > 0) {
-    return res.status(409).json({
-      error: 'unresolved_ingredients',
-      message: 'Some ingredients do not exist in the catalogue yet.',
-      red: annotated.filter((l) => l.is_red).map((l) => l.name || l.reference || '?'),
-    });
+    return { id, name: tr.name, status: 'blocked',
+      red: annotated.filter((l) => l.is_red).map((l) => l.name || l.reference || '?') };
   }
-
   const validLines = annotated.filter((l) => l.resolved_item_id && Number(l.quantity_kg) > 0);
-  if (validLines.length === 0) {
-    return res.status(400).json({ error: 'Recipe has no valid ingredient lines' });
-  }
+  if (validLines.length === 0) return { id, name: tr.name, status: 'failed', error: 'No valid ingredient lines' };
 
   const payload = {
     name:               tr.name,
@@ -296,32 +290,102 @@ router.post('/:id/promote', requireManager, async (req, res) => {
       : [],
   };
 
-  const userId = req.localUser?.id ?? null;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const result = await saveRecipeBom(client, payload, userId);
     await client.query(`DELETE FROM test_recipes WHERE id = $1`, [id]);
     await logAudit({
-      userId,
-      actionType:  'test_recipe_promote',
-      entity:      'recipe',
-      entityId:    result.item_id,
+      userId, actionType: 'test_recipe_promote', entity: 'recipe', entityId: result.item_id,
       description: `Promoted test recipe "${tr.name}" (${tr.recipe_type}) to the real ${tr.recipe_type} list.`,
-      ipAddress:   getIp(req),
+      ipAddress: ip,
     }, client);
     await client.query('COMMIT');
-    res.json({ ...result, recipe_type: tr.recipe_type, message: 'Test recipe promoted' });
+    return { id, name: tr.name, status: 'promoted', item_id: result.item_id, recipe_type: tr.recipe_type };
   } catch (err) {
-    await client.query('ROLLBACK');
-    if (err.code === 'VALIDATION') return res.status(400).json({ error: err.message });
-    if (err.message && err.message.includes('Circular dependency'))
-      return res.status(422).json({ error: err.message });
-    console.error('[POST /test-recipes/:id/promote]', err);
-    res.status(500).json({ error: err.message });
+    await client.query('ROLLBACK').catch(() => {});
+    return { id, name: tr.name, status: 'failed', error: err.message };
   } finally {
     client.release();
   }
+}
+
+// ── POST /:id/promote — MANAGER ONLY ──
+router.post('/:id/promote', requireManager, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid id' });
+  const r = await promoteOne(id, req.localUser?.id ?? null, getIp(req));
+  if (r.status === 'notfound') return res.status(404).json({ error: 'Test recipe not found' });
+  if (r.status === 'blocked')  return res.status(409).json({ error: 'unresolved_ingredients', message: 'Some ingredients do not exist in the catalogue yet.', red: r.red });
+  if (r.status === 'failed')   return res.status(400).json({ error: r.error });
+  res.json({ item_id: r.item_id, recipe_type: r.recipe_type, message: 'Test recipe promoted' });
+});
+
+// ── POST /bulk-promote — MANAGER ONLY ──
+// Promote many; recipes with red ingredients are reported as blocked.
+router.post('/bulk-promote', requireManager, async (req, res) => {
+  const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map((n) => parseInt(n, 10)).filter(Number.isInteger))];
+  if (!ids.length) return res.status(400).json({ error: 'ids[] required' });
+  const userId = req.localUser?.id ?? null;
+  const ip = getIp(req);
+  let promoted = 0;
+  const blocked = [];
+  for (const id of ids) {
+    const r = await promoteOne(id, userId, ip);
+    if (r.status === 'promoted') promoted++;
+    else if (r.status !== 'notfound') blocked.push({ id, name: r.name, reason: r.status === 'blocked' ? 'red' : (r.error || 'failed') });
+  }
+  res.json({ promoted, blocked });
+});
+
+// ── POST /bulk-delete ──
+router.post('/bulk-delete', requireAdmin, async (req, res) => {
+  const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map((n) => parseInt(n, 10)).filter(Number.isInteger))];
+  if (!ids.length) return res.status(400).json({ error: 'ids[] required' });
+  const { rowCount } = await pool.query(`DELETE FROM test_recipes WHERE id = ANY($1::int[])`, [ids]);
+  res.json({ count: rowCount });
+});
+
+// ── POST /export — selected pending test recipes → Excel (from drafts) ──
+router.post('/export', requireAdmin, async (req, res) => {
+  const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map((n) => parseInt(n, 10)).filter(Number.isInteger))];
+  const where = ids.length ? `WHERE id = ANY($1::int[])` : '';
+  const { rows } = await pool.query(`SELECT id, name, reference_code, recipe_type, draft FROM test_recipes ${where} ORDER BY name`, ids.length ? [ids] : []);
+  if (!rows.length) return res.status(404).json({ error: 'No pending recipes to export.' });
+
+  const recipesForSheet = rows.map((tr) => {
+    const d = tr.draft || {};
+    const lines = (Array.isArray(d.lines) ? d.lines : []).map((l) => ({
+      name:        l.resolved_item?.name || l.name || '',
+      code:        l.resolved_item?.reference || l.reference || '',
+      quantity_kg: l.quantity_kg != null ? Number(l.quantity_kg) : null,
+      waste_pct:   l.waste_pct != null ? Number(l.waste_pct) : 0,
+      line_uom:    l.line_uom || 'kg',
+    }));
+    return {
+      image_url: d.image_url || null,
+      name: tr.name,
+      reference_code: tr.reference_code,
+      recipe_type: tr.recipe_type,
+      yield_kg: Number(d.yieldKg) || null,
+      full_name: d.full_name || null,
+      description: d.description || null,
+      allergens: Array.isArray(d.allergens) ? d.allergens : [],
+      is_spicy: !!d.is_spicy,
+      serving_suggestion: d.serving_suggestion || null,
+      servings_count: d.servings_count ?? null,
+      total_weight: d.total_weight ?? null,
+      cost_per_kg: null, total_cost: null, wholesale_price: null, retail_price: null,
+      version: null, updated_at: '',
+      lines,
+    };
+  });
+
+  const buf = await buildExportWorkbook(recipesForSheet, { includePrices: false });
+  res.setHeader('Content-Type', XLSX_CONTENT_TYPE);
+  res.setHeader('Content-Disposition', `attachment; filename="pending-recipes-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+  res.setHeader('Content-Length', buf.length);
+  res.send(Buffer.from(buf));
 });
 
 module.exports = router;

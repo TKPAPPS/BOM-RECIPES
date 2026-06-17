@@ -23,6 +23,7 @@ import { RecipesPrintPage } from './components/KitchenRecipes/RecipesPrintPage';
 import { TestRecipes } from './components/TestRecipes/TestRecipes';
 import { PendingApproval } from './components/TestRecipes/PendingApproval';
 import { TestRecipeView } from './components/TestRecipes/TestRecipeView';
+import { TestRecipesPrintPage } from './components/TestRecipes/TestRecipesPrintPage';
 import { ProfilePage } from './components/Profile/ProfilePage';
 import { IngredientView } from './components/Products/IngredientView';
 import { TabRoute } from './components/TabRoute';
@@ -84,6 +85,7 @@ const router = createBrowserRouter(
         <Route path="test-kitchen"      element={<TabRoute tab="test"><TestRecipes /></TabRoute>} />
         <Route path="test-recipe/new"   element={<TabRoute tab="test"><RecipeBuilder mode="test" /></TabRoute>} />
         <Route path="test-recipe/view/:itemId" element={<TabRoute tab="test"><TestRecipeView /></TabRoute>} />
+        <Route path="test-recipes/print" element={<TabRoute tab="pending"><TestRecipesPrintPage /></TabRoute>} />
         <Route path="test-recipe/:itemId" element={<TabRoute tab="test"><RecipeBuilder mode="test" /></TabRoute>} />
         <Route path="pending-recipes"   element={<TabRoute tab="pending"><PendingApproval /></TabRoute>} />
         <Route path="where-used"      element={<TabRoute tab="whereused"><WhereUsedPage /></TabRoute>} />

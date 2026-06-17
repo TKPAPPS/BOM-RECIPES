@@ -89,9 +89,25 @@ async function resolveIngredients(client, codes, names) {
     [refList, nameList]
   );
 
+  // Recipes carry their code on boms.reference_code (not items.reference),
+  // so also match recipe-type ingredients by their BOM code — this lets a
+  // line reference a base recipe (incl. a sibling created in the same
+  // import) by its BAS-#### code.
+  let recRows = [];
+  if (refList.length) {
+    const r2 = await client.query(
+      `SELECT i.id, b.reference_code AS reference, i.name, i.name_en, i.name_he, i.item_type
+         FROM boms b JOIN items i ON i.id = b.item_id
+        WHERE b.is_active = TRUE AND i.is_active = TRUE
+          AND UPPER(b.reference_code) = ANY($1::text[])`,
+      [refList]
+    );
+    recRows = r2.rows;
+  }
+
   const byRef  = new Map();
   const byName = new Map();
-  for (const r of rows) {
+  for (const r of [...rows, ...recRows]) {
     if (r.reference) byRef.set(r.reference.toUpperCase(), r);
     const names = [r.name, r.name_en, r.name_he].filter(Boolean);
     for (const n of names) {
@@ -237,18 +253,17 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
     }
   }
 
-  // Batch-resolve every distinct ingredient reference + name across
-  // every recipe in the file with one query.
-  const allCodes = recipes.flatMap((r) => r.lines.map((l) => l.code));
-  const allNames = recipes.flatMap((r) => r.lines.map((l) => l.name));
-
   const userId = req.localUser?.id ?? null;
-  const ingClient = await pool.connect();
-  let ingMap;
-  try {
-    ingMap = await resolveIngredients(ingClient, allCodes, allNames);
-  } finally {
-    ingClient.release();
+
+  // Build a fresh ingredient map for a set of recipes against the CURRENT
+  // DB state.  Re-run each round so recipes can resolve sub-recipe
+  // siblings created earlier in the same import.
+  async function buildIngMap(list) {
+    const codes = list.flatMap((r) => r.lines.map((l) => l.code));
+    const names = list.flatMap((r) => r.lines.map((l) => l.name));
+    const c = await pool.connect();
+    try { return await resolveIngredients(c, codes, names); }
+    finally { c.release(); }
   }
 
   // Per-recipe processing, each in its own transaction so a bad row
@@ -315,20 +330,16 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
     }
   }
 
-  // Process a single recipe end-to-end and return its report detail.
-  // Pure w.r.t. shared state (no report mutation) so recipes can run
-  // concurrently — each opens its own pooled connection + transaction.
-  async function processOne(draft) {
-    const detail = { row: draft.rowNumber, name: draft.name, status: 'failed', message: '' };
-
-    // ── Resolve every ingredient; build both the real lines (matched)
-    //    and the full draft-line list (matched + unmatched) for a
-    //    possible Pending Approval draft. ──
-    const unresolved = [];      // human-readable labels for the report
-    const resolvedLines = [];   // → real bom_lines
-    const draftLines = [];      // → test-recipe draft (keeps unmatched as red)
+  // Resolve a draft's ingredient lines against a (current) ingredient
+  // map — returns the matched real lines, the full draft-line list (for a
+  // possible Pending Approval draft) and human-readable labels for the
+  // unmatched ones.  No DB writes.
+  function resolveDraft(draft, map) {
+    const unresolved = [];
+    const resolvedLines = [];
+    const draftLines = [];
     for (const line of draft.lines) {
-      const ing = lookupIngredient(ingMap, line);
+      const ing = lookupIngredient(map, line);
       draftLines.push({
         item_id:     ing ? ing.id : null,
         reference:   line.code || null,
@@ -352,36 +363,20 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
         unresolved.push(label);
       }
     }
+    return { resolvedLines, draftLines, unresolved };
+  }
 
-    // ── Some ingredients unrecognised → send to Pending Approval ──
-    if (unresolved.length) {
-      try {
-        await sendToPendingApproval(draft, draftLines);
-        detail.status  = 'failed'; // stays "failed" in the report until fixed & approved
-        detail.message =
-          `Sent to Pending Approval — ${unresolved.length} unrecognized ingredient(s) not in the catalogue: `
-          + `${unresolved.join('; ')}. Open it under "Pending Approval", pick the right products and approve.`;
-      } catch (e) {
-        detail.message = `Could not queue for approval: ${e.message}`;
-      }
-      return detail;
-    }
-
+  // Save a fully-resolved recipe as a real BOM (create / update / skip),
+  // returning its report detail.
+  async function saveResolvedRecipe(draft, resolvedLines) {
+    const detail = { row: draft.rowNumber, name: draft.name, status: 'failed', message: '' };
     if (resolvedLines.length === 0) {
       detail.message = 'No ingredient rows for this recipe.';
       return detail;
     }
 
-    // ── Dedup by ingredient_item_id ──
-    // The DB enforces UNIQUE (bom_id, ingredient_item_id) on bom_lines.
-    // Two file rows can collide on the same item id for two reasons:
-    //   • Genuine duplicates (the same ingredient listed twice in the
-    //     spreadsheet — sometimes a copy-paste accident).
-    //   • Resolver collision — one line matched by reference code,
-    //     another by name, but both names ultimately resolve to the
-    //     same items row.
-    // Either way we merge them (sum quantities, keep the higher waste,
-    // keep the first uom) and note it in the report so the user knows.
+    // Dedup by ingredient_item_id (UNIQUE(bom_id, ingredient_item_id)):
+    // merge duplicate/colliding lines (sum qty, keep higher waste).
     const lineByItem = new Map();
     for (const ln of resolvedLines) {
       const existing = lineByItem.get(ln.ingredient_item_id);
@@ -399,7 +394,6 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
       warnings.push(`Merged ${dedupCount} duplicate ingredient line${dedupCount === 1 ? '' : 's'} (same ingredient appeared twice — quantities summed).`);
     }
 
-    // Decide create / update / skip
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -420,8 +414,6 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
         recipe_type:        draft.recipe_type || defaultType,
         full_name:          draft.full_name,
         description:        draft.description,
-        // image_url is only persisted when actually present so we do not
-        // blank an existing image on an update with no URL provided.
         image_url:          draft.image_url || undefined,
         allergens:          draft.allergens,
         is_spicy:           draft.is_spicy,
@@ -460,25 +452,63 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
     }
   }
 
-  // ── Bounded-concurrency runner ──
-  // The DB is remote (~85ms/round-trip) and each recipe issues dozens of
-  // sequential queries, so processing recipes strictly one-at-a-time made
-  // an 88-recipe import take minutes.  Running a handful in parallel (each
-  // in its own transaction) cuts wall-clock ~N× while staying well under
-  // the pool's connection limit.  Results are kept in file order.
-  const CONCURRENCY = Math.min(6, recipes.length || 1);
-  const results = new Array(recipes.length);
-  let cursor = 0;
-  async function worker() {
-    for (;;) {
-      const i = cursor++;
-      if (i >= recipes.length) return;
-      results[i] = await processOne(recipes[i]);
-    }
-  }
-  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  // ── Multi-round runner ──
+  // Each round: rebuild the ingredient map from the CURRENT DB, then save
+  // every recipe whose ingredients ALL resolve (bounded concurrency).
+  // Recipes that reference a sub-recipe sibling created earlier in the
+  // import resolve in a later round.  When a round resolves nothing new,
+  // the remainder has genuinely-missing ingredients → Pending Approval.
+  const CONCURRENCY = 6;
+  const detailByRow = new Map();
+  let remaining = recipes.slice();
+  let lastMap = new Map();
 
-  for (const detail of results) {
+  for (;;) {
+    const map = await buildIngMap(remaining);
+    lastMap = map;
+    const resolvable = [];
+    const deferred   = [];
+    for (const draft of remaining) {
+      const { unresolved } = resolveDraft(draft, map);
+      (unresolved.length === 0 ? resolvable : deferred).push(draft);
+    }
+    if (resolvable.length === 0) { remaining = deferred; break; }  // no progress
+
+    let cursor = 0;
+    const worker = async () => {
+      for (;;) {
+        const i = cursor++;
+        if (i >= resolvable.length) return;
+        const draft = resolvable[i];
+        const { resolvedLines } = resolveDraft(draft, map);
+        detailByRow.set(draft.rowNumber, await saveResolvedRecipe(draft, resolvedLines));
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, resolvable.length) }, worker));
+
+    remaining = deferred;
+    if (remaining.length === 0) break;
+  }
+
+  // Whatever is still unresolved genuinely has missing ingredients →
+  // queue it in Pending Approval (red) for manual fixing.
+  for (const draft of remaining) {
+    const { draftLines, unresolved } = resolveDraft(draft, lastMap);
+    const detail = { row: draft.rowNumber, name: draft.name, status: 'failed', message: '' };
+    try {
+      await sendToPendingApproval(draft, draftLines);
+      detail.message =
+        `Sent to Pending Approval — ${unresolved.length} unrecognized ingredient(s) not in the catalogue: `
+        + `${unresolved.join('; ')}. Open it under "Pending Approval", pick the right products and approve.`;
+    } catch (e) {
+      detail.message = `Could not queue for approval: ${e.message}`;
+    }
+    detailByRow.set(draft.rowNumber, detail);
+  }
+
+  // Aggregate details in original file order.
+  for (const draft of recipes) {
+    const detail = detailByRow.get(draft.rowNumber);
     if (!detail) continue;
     report.details.push(detail);
     if (detail.status === 'created')      report.created++;
