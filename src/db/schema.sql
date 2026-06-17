@@ -226,7 +226,7 @@ CREATE TABLE IF NOT EXISTS reference_code_categories (
                   CHECK (prefix ~ '^[A-Z]{3,5}$'),
     description TEXT,
     is_active   BOOLEAN     NOT NULL DEFAULT TRUE,
-    created_by  INTEGER     REFERENCES users(id) ON DELETE SET NULL,
+    created_by  INTEGER,    -- FK to users added at the bottom (users created later)
     created_at  TIMESTAMPTZ DEFAULT NOW(),
     updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
@@ -763,3 +763,14 @@ END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_pricing_formulas_default_active
   ON pricing_formulas (price_tier)
   WHERE is_default = TRUE AND is_active = TRUE;
+
+-- ------------------------------------------------------------
+-- Deferred FK: reference_code_categories.created_by → users.
+-- Declared here (not inline) so a FRESH database builds regardless of
+-- table-creation order.  Idempotent.
+-- ------------------------------------------------------------
+DO $$ BEGIN
+  ALTER TABLE reference_code_categories
+    ADD CONSTRAINT reference_code_categories_created_by_fkey
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;

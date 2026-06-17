@@ -59,6 +59,14 @@ function patch<T>(path: string, body: unknown)   { return request<T>(path, { met
 function del<T>(path: string)                    { return request<T>(path, { method: 'DELETE' }); }
 
 export const api = {
+  /**
+   * Liveness + DB connectivity probe. Full round trip:
+   * browser → Express (/api/health) → Neon (SELECT 1, NOW()) → back.
+   * Returns the DB's server time so you can confirm the connection.
+   */
+  health: () =>
+    get<{ status: string; database: string; serverTime: string }>(`/health`),
+
   searchItems: (q: string) =>
     get<SearchResult[]>(`/items/search?q=${encodeURIComponent(q)}`),
 

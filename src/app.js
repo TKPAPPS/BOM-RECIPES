@@ -1,6 +1,7 @@
 require('dotenv').config();
 require('express-async-errors');
 
+const path         = require('path');
 const express      = require('express');
 const cors         = require('cors');
 const pool         = require('./config/db');
@@ -29,9 +30,24 @@ app.use(express.json({ limit: '25mb' }));
 // ── Public routes (no auth required) ─────────────────────────────────────────
 app.use('/api/auth', authRouter);
 
+// Health probe: confirms the API is up AND that it can reach the
+// database. Returns the DB's own clock so you can eyeball connectivity.
+// 200 = DB reachable, 503 = API up but DB unreachable.
 app.get('/api/health', async (_req, res) => {
-  await pool.query('SELECT 1');
-  res.json({ status: 'ok' });
+  try {
+    const { rows } = await pool.query('SELECT 1 AS ok, NOW() AS server_time');
+    res.json({
+      status: 'ok',
+      database: 'connected',
+      serverTime: rows[0].server_time,
+    });
+  } catch (err) {
+    res.status(503).json({
+      status: 'error',
+      database: 'unreachable',
+      message: err.message,
+    });
+  }
 });
 
 // ── Protected routes (JWT required) ──────────────────────────────────────────
@@ -51,11 +67,29 @@ app.use('/api/users',      authMiddleware, pricesMiddleware, require('./routes/u
 app.use('/api/audit-logs', authMiddleware, pricesMiddleware, require('./routes/auditLogs'));
 app.use('/api/role-permissions', authMiddleware, pricesMiddleware, require('./routes/rolePermissions'));
 
+// ── Serve the built frontend (single-origin deploy) ──────────────────────────
+// When client/dist exists (after `npm run build` in client/), serve the
+// React SPA from the same Express server. This means ONE URL serves both
+// the API (/api/*) and the app — handy for a tunnel or single-host deploy.
+// API + error handler are registered above, so only non-/api paths fall
+// through to the SPA's index.html (client-side routing takes over).
+const clientDist = path.join(__dirname, '..', 'client', 'dist');
+app.use(express.static(clientDist));
+app.get(/^\/(?!api\/).*/, (_req, res) => {
+  res.sendFile(path.join(clientDist, 'index.html'));
+});
+
 // ── Error handler (must be last) ─────────────────────────────────────────────
 app.use(errorHandler);
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
+// On Vercel the app runs as a serverless function: the platform invokes
+// the exported handler per request, so we must NOT bind a port or start
+// the node-cron job (serverless has no long-lived process). We only
+// listen + schedule when running as a normal long-lived server (local /
+// Render / Railway), detected by the absence of the VERCEL env var.
 const PORT = process.env.PORT || 3000;
+if (!process.env.VERCEL) {
 app.listen(PORT, async () => {
   console.log(`[app] BOM System listening on port ${PORT}`);
 
@@ -85,5 +119,6 @@ app.listen(PORT, async () => {
     console.error('[app] Failed to start sync job:', err.message);
   }
 });
+}
 
 module.exports = app;

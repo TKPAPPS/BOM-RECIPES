@@ -19,6 +19,7 @@ export const PendingApproval: React.FC = () => {
   const toast = useToastStore((s) => s.push);
 
   const [viewMode, setViewMode] = useState<'cards' | 'list'>('list');
+  const [filter, setFilter] = useState<'all' | 'ready' | 'issues'>('all');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
 
@@ -26,6 +27,11 @@ export const PendingApproval: React.FC = () => {
     queryKey: ['test-recipes', 'pending'],
     queryFn: () => api.getTestRecipes('pending'),
   });
+
+  // Ready = no red ingredients (approvable); Issues = has red (needs fix).
+  const filtered = recipes.filter((r) =>
+    filter === 'ready' ? r.red_count === 0 : filter === 'issues' ? r.red_count > 0 : true
+  );
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['test-recipes'] });
@@ -36,9 +42,9 @@ export const PendingApproval: React.FC = () => {
 
   const toggleOne = (id: number) =>
     setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const allSelected = recipes.length > 0 && recipes.every((r) => selected.has(r.id));
+  const allSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id));
   const toggleAll = () =>
-    setSelected(allSelected ? new Set() : new Set(recipes.map((r) => r.id)));
+    setSelected(allSelected ? new Set() : new Set(filtered.map((r) => r.id)));
 
   // ── Single approve ──
   const approve = useMutation({
@@ -54,6 +60,7 @@ export const PendingApproval: React.FC = () => {
   const bulkApprove = async () => {
     if (!selected.size) return;
     setBusy(true);
+    toast(t.bulkApproving.replace('{n}', String(selected.size)), { type: 'info' });
     try {
       const r = await api.bulkPromoteTestRecipes(ids());
       invalidate(); clearSel();
@@ -97,12 +104,20 @@ export const PendingApproval: React.FC = () => {
   return (
     <div className="bom-history">
       <div className="bom-history__header">
-        <h2 className="bom-history__title">{t.pendingApproval}</h2>
+        <h2 className="bom-history__title">
+          {t.pendingApproval}
+          <span className="kr-tab__count" style={{ marginInlineStart: 8 }}>{filtered.length}</span>
+        </h2>
       </div>
       <p className="bom-history__subtitle">{t.pendingApprovalHint}</p>
 
-      {/* Toolbar: bulk bar (when selected) + view toggle */}
+      {/* Toolbar: status filter + bulk bar (when selected) + view toggle */}
       <div className="kr-viewbar">
+        <div className="kr-view-toggle pend-filter" role="group" aria-label={t.pendFilterLabel}>
+          <button type="button" className={`kr-view-toggle__btn${filter === 'all' ? ' kr-view-toggle__btn--active' : ''}`} onClick={() => setFilter('all')} title={t.pendFilterAll}>{t.pendFilterAll}</button>
+          <button type="button" className={`kr-view-toggle__btn${filter === 'ready' ? ' kr-view-toggle__btn--active' : ''}`} onClick={() => setFilter('ready')} title={t.pendFilterReady} aria-label={t.pendFilterReady}>✓</button>
+          <button type="button" className={`kr-view-toggle__btn${filter === 'issues' ? ' kr-view-toggle__btn--active' : ''}`} onClick={() => setFilter('issues')} title={t.pendFilterIssues} aria-label={t.pendFilterIssues}>⚠</button>
+        </div>
         {selected.size > 0 && (
           <div className="kr-bulkbar">
             <span className="kr-bulkbar__count">{t.bulkSelected.replace('{n}', String(selected.size))}</span>
@@ -110,7 +125,7 @@ export const PendingApproval: React.FC = () => {
               <button className="btn btn--ghost btn--sm" onClick={bulkExport} disabled={busy}>⭳ {t.rioExportBtn}</button>
               <button className="btn btn--ghost btn--sm" onClick={bulkPrint} disabled={busy}>⎙ {t.rbViewPrint}</button>
               <button className="btn btn--ghost btn--sm" onClick={bulkPrint} disabled={busy}>📄 {t.pdf}</button>
-              <button className="btn btn--primary btn--sm" onClick={bulkApprove} disabled={busy}>✓ {t.approveRecipe}</button>
+              <button className="btn btn--primary btn--sm" onClick={bulkApprove} disabled={busy}>{busy ? '…' : `✓ ${t.approveRecipe}`}</button>
               <button className="btn btn--ghost btn--sm kr-bulkbar__danger" onClick={bulkDelete} disabled={busy}>🗑 {t.delete}</button>
               <button className="btn btn--ghost btn--sm" onClick={clearSel} disabled={busy}>✕ {t.clear}</button>
             </div>
@@ -132,15 +147,14 @@ export const PendingApproval: React.FC = () => {
         <div className="view-placeholder"><p>{t.loading}</p></div>
       ) : recipes.length === 0 ? (
         <div className="view-placeholder"><p>{t.pendingApprovalEmpty}</p></div>
+      ) : filtered.length === 0 ? (
+        <div className="view-placeholder"><p>{t.pendFilterEmpty}</p></div>
       ) : viewMode === 'cards' ? (
         <div className="kr-cards">
-          {recipes.map((r) => {
+          {filtered.map((r) => {
             const hasRed = r.red_count > 0;
             return (
               <div className="kr-card" key={r.id}>
-                <label className="kr-card__check">
-                  <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} />
-                </label>
                 <Link to={`/test-recipe/view/${r.id}`} className="kr-card__media kr-card__img kr-card__img--name">
                   <span className="kr-card__name-on-media">{r.name}</span>
                 </Link>
@@ -175,7 +189,7 @@ export const PendingApproval: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {recipes.map((r) => {
+            {filtered.map((r) => {
               const hasRed = r.red_count > 0;
               return (
                 <tr key={r.id} className={selected.has(r.id) ? 'bom-history__row--selected' : undefined}>

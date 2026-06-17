@@ -109,11 +109,53 @@ router.get('/', requireAdmin, async (req, res) => {
     [status]
   );
 
-  const list = [];
+  // Batch-resolve EVERY ingredient identity across all drafts in ONE query
+  // (the old per-line resolveLineItem storm took ~30s for 100+ recipes).
+  // Mirrors resolveLineItem: stored item_id → reference → name, active only.
+  const idSet = new Set(), refSet = new Set(), nameSet = new Set();
   for (const r of rows) {
-    const { redCount } = await annotateDraft(r.draft || {});
-    const lineCount = Array.isArray(r.draft?.lines) ? r.draft.lines.length : 0;
-    list.push({
+    for (const l of (Array.isArray(r.draft?.lines) ? r.draft.lines : [])) {
+      const id = parseInt(l.item_id, 10);
+      if (Number.isInteger(id) && id > 0) idSet.add(id);
+      const ref = (l.reference || '').toString().trim().toLowerCase();
+      if (ref) refSet.add(ref);
+      const nm = (l.name || '').toString().trim().toLowerCase();
+      if (nm) nameSet.add(nm);
+    }
+  }
+  const okId = new Set(), okRef = new Set(), okName = new Set();
+  if (idSet.size || refSet.size || nameSet.size) {
+    const { rows: items } = await pool.query(
+      `SELECT id, reference, name, name_en FROM items
+        WHERE is_active = TRUE AND (
+          id = ANY($1::int[])
+          OR LOWER(reference) = ANY($2::text[])
+          OR LOWER(name)      = ANY($3::text[])
+          OR LOWER(name_en)   = ANY($3::text[]))`,
+      [[...idSet], [...refSet], [...nameSet]]
+    );
+    for (const it of items) {
+      okId.add(it.id);
+      if (it.reference) okRef.add(it.reference.toLowerCase());
+      if (it.name)      okName.add(it.name.toLowerCase());
+      if (it.name_en)   okName.add(it.name_en.toLowerCase());
+    }
+  }
+  const lineResolves = (l) => {
+    const id = parseInt(l.item_id, 10);
+    if (Number.isInteger(id) && id > 0 && okId.has(id)) return true;
+    const ref = (l.reference || '').toString().trim().toLowerCase();
+    if (ref && okRef.has(ref)) return true;
+    const nm = (l.name || '').toString().trim().toLowerCase();
+    if (nm && okName.has(nm)) return true;
+    return false;
+  };
+
+  const list = rows.map((r) => {
+    const lines = Array.isArray(r.draft?.lines) ? r.draft.lines : [];
+    let red = 0;
+    for (const l of lines) if (!lineResolves(l)) red++;
+    return {
       id:              r.id,
       name:            r.name,
       reference_code:  r.reference_code,
@@ -122,10 +164,10 @@ router.get('/', requireAdmin, async (req, res) => {
       review_note:     r.review_note,
       updated_at:      r.updated_at,
       created_by_name: r.created_by_name,
-      line_count:      lineCount,
-      red_count:       redCount,
-    });
-  }
+      line_count:      lines.length,
+      red_count:       red,
+    };
+  });
   res.json(list);
 });
 
@@ -257,6 +299,29 @@ async function promoteOne(id, userId, ip) {
   const validLines = annotated.filter((l) => l.resolved_item_id && Number(l.quantity_kg) > 0);
   if (validLines.length === 0) return { id, name: tr.name, status: 'failed', error: 'No valid ingredient lines' };
 
+  // Merge lines that resolve to the SAME item (e.g. one matched by code,
+  // another by name, or a genuine duplicate) — bom_lines enforces
+  // UNIQUE(bom_id, ingredient_item_id), so sum quantities / keep the
+  // higher waste instead of failing on a duplicate key.
+  const byItem = new Map();
+  for (const l of validLines) {
+    const key = l.resolved_item_id;
+    const ex = byItem.get(key);
+    if (ex) {
+      ex.quantity_kg += Number(l.quantity_kg);
+      ex.waste_pct = Math.max(ex.waste_pct, Number(l.waste_pct) || 0);
+    } else {
+      byItem.set(key, {
+        ingredient_item_id: key,
+        quantity_kg:        Number(l.quantity_kg),
+        line_uom:           l.line_uom || 'kg',
+        waste_pct:          Number(l.waste_pct) || 0,
+        step_number:        l.step_number ?? null,
+      });
+    }
+  }
+  const mergedLines = [...byItem.values()];
+
   const payload = {
     name:               tr.name,
     reference_code:     tr.reference_code,
@@ -274,13 +339,7 @@ async function promoteOne(id, userId, ip) {
     servings_count:     draft.servings_count ?? null,
     total_weight:       draft.total_weight ?? null,
     pricing_formula_id: draft.pricing_formula_id ?? null,
-    lines: validLines.map((l) => ({
-      ingredient_item_id: l.resolved_item_id,
-      quantity_kg:        Number(l.quantity_kg),
-      line_uom:           l.line_uom || 'kg',
-      waste_pct:          Number(l.waste_pct) || 0,
-      step_number:        l.step_number ?? null,
-    })),
+    lines: mergedLines,
     steps: Array.isArray(draft.steps)
       ? draft.steps.map((s) => ({
           step_number: s.step_number,
@@ -330,11 +389,23 @@ router.post('/bulk-promote', requireManager, async (req, res) => {
   const ip = getIp(req);
   let promoted = 0;
   const blocked = [];
-  for (const id of ids) {
-    const r = await promoteOne(id, userId, ip);
-    if (r.status === 'promoted') promoted++;
-    else if (r.status !== 'notfound') blocked.push({ id, name: r.name, reason: r.status === 'blocked' ? 'red' : (r.error || 'failed') });
-  }
+
+  // Bounded concurrency — promoting dozens one-at-a-time on a remote DB
+  // takes minutes and looks "stuck".  Run a handful in parallel (each its
+  // own transaction).  Conservative limit to avoid lock contention on
+  // shared sub-recipes whose cost gets recomputed.
+  const CONCURRENCY = 4;
+  let cursor = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = cursor++;
+      if (i >= ids.length) return;
+      const r = await promoteOne(ids[i], userId, ip);
+      if (r.status === 'promoted') promoted++;
+      else if (r.status !== 'notfound') blocked.push({ id: ids[i], name: r.name, reason: r.status === 'blocked' ? 'red' : (r.error || 'failed') });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, ids.length) }, worker));
   res.json({ promoted, blocked });
 });
 
