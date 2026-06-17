@@ -6,13 +6,14 @@ const { logAudit, getIp } = require('../services/auditService');
 const router = express.Router();
 
 // Canonical sidebar tab keys (mirror of client/src/config/tabs.ts).
-const TAB_KEYS = ['dashboard', 'book', 'kitchen', 'test', 'pending', 'whereused', 'products', 'settings', 'logs'];
+const TAB_KEYS = ['dashboard', 'book', 'kitchen', 'test', 'pending', 'whereused', 'products', 'settings', 'logs', 'profile'];
 const ROLES    = ['customer', 'admin', 'manager'];
 
-// Fallback defaults if a row is missing (matches the schema seed).
+// Fallback defaults if a row is missing.  Personal area (profile) is on
+// by default for every role but can be toggled in the matrix.
 const DEFAULTS = {
-  customer: ['book'],
-  admin:    ['book', 'test', 'products'],
+  customer: ['book', 'profile'],
+  admin:    ['book', 'test', 'products', 'profile'],
   manager:  [...TAB_KEYS],
 };
 

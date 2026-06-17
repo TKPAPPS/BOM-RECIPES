@@ -108,6 +108,7 @@ const translations = {
     searching:           'Searching…',
     subRecipe:           'Sub-Recipe',
     openBaseRecipe:      'Open the full base recipe',
+    openIngredient:      'Open ingredient page',
     raw:                 'Raw',
     // Production costs
     productionCosts:     'Production Costs',
@@ -270,6 +271,7 @@ const translations = {
     rbTotalWeight:           'Net weight',
     rbViewRecipe:            'Open',
     rbBackToList:            '← Back to Recipe Book',
+    back:                    'Back',
     rbIngredientsHeader:     'Ingredients',
     rbQuantityHeader:        'Quantity',
     rbWasteHeader:           'Waste',
@@ -586,6 +588,7 @@ const translations = {
     searching:           'מחפש…',
     subRecipe:           'תת-מתכון',
     openBaseRecipe:      'פתח את מתכון הבסיס המלא',
+    openIngredient:      'פתח את עמוד הרכיב',
     raw:                 'חומר גלם',
     // Production costs
     productionCosts:     'עלויות ייצור',
@@ -748,6 +751,7 @@ const translations = {
     rbTotalWeight:           'משקל נטו',
     rbViewRecipe:            'פתח',
     rbBackToList:            '→ חזרה לספר המתכונים',
+    back:                    'חזרה',
     rbIngredientsHeader:     'מרכיבים',
     rbQuantityHeader:        'כמות',
     rbWasteHeader:           'פחת',

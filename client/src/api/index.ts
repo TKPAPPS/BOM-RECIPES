@@ -1,4 +1,4 @@
-import type { SearchResult, PricingFormula, BomDetail, BomSummary, Category, BomSnapshot, AffectedRecipesResult, RecipeType, CalcResult, UserRow, AuditLogPage, SyncStatus, DashboardSummary, ProductRow, ProductOverride, RecipeImportReport, RecipeExportFilters, TestRecipeSummary, TestRecipeDetail, TestRecipeDraft, ReferenceCodeCategory, MeProfile } from '../types';
+import type { SearchResult, PricingFormula, BomDetail, BomSummary, Category, BomSnapshot, AffectedRecipesResult, RecipeType, CalcResult, UserRow, AuditLogPage, SyncStatus, DashboardSummary, ProductRow, ProductOverride, RecipeImportReport, RecipeExportFilters, TestRecipeSummary, TestRecipeDetail, TestRecipeDraft, ReferenceCodeCategory, MeProfile, ItemDetail } from '../types';
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api';
 
@@ -61,6 +61,9 @@ function del<T>(path: string)                    { return request<T>(path, { met
 export const api = {
   searchItems: (q: string) =>
     get<SearchResult[]>(`/items/search?q=${encodeURIComponent(q)}`),
+
+  getItem: (id: number) =>
+    get<ItemDetail>(`/items/${id}`),
 
   getBom: (itemId: number) =>
     get<BomDetail>(`/boms/${itemId}`),

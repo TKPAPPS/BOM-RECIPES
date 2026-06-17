@@ -286,7 +286,13 @@ const SubRecipeLines: React.FC<{ ingredients: CalcIngredient[]; depth: number }>
                   {ing.ingredient_name.trim().charAt(0).toUpperCase() || '·'}
                 </span>
               )}
-              <span className="recipe-view__ing-name">{ing.ingredient_name}</span>
+              <Link
+                to={ing.ingredient_type === 'recipe' ? `/recipes/view/${ing.ingredient_id}` : `/ingredient/${ing.ingredient_id}`}
+                className="recipe-view__ing-name recipe-view__ing-name--link"
+                title={ing.ingredient_type === 'recipe' ? t.openBaseRecipe : t.openIngredient}
+              >
+                {ing.ingredient_name}
+              </Link>
               {ing.ingredient_type === 'recipe' && (
                 <span className="recipe-view__sub-pill">{t.subRecipe}</span>
               )}

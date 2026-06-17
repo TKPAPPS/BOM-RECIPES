@@ -201,4 +201,28 @@ router.post('/', requireAdmin, async (req, res) => {
   res.status(201).json(rows[0]);
 });
 
+// GET /items/:id — single item (read-only) for the ingredient page.
+// Open to any authenticated user; price fields are stripped by
+// pricesMiddleware for users without view-price permission.
+router.get('/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+  const { rows } = await pool.query(
+    `SELECT i.id,
+            COALESCE(i.name_en, i.name) AS name,
+            i.name_en, i.name_he, i.reference, i.uom, i.item_type,
+            i.cost_per_kg, i.raw_cost, i.volume_weight, i.weight_source,
+            i.image_url, i.is_active, i.odoo_archived, i.last_synced_at,
+            COALESCE(b.reference_code, i.reference) AS reference_code,
+            c.name AS category_name
+       FROM items i
+       LEFT JOIN categories c ON c.id = i.category_id
+       LEFT JOIN boms b ON b.item_id = i.id AND b.is_active = TRUE
+      WHERE i.id = $1`,
+    [id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'not found' });
+  res.json(rows[0]);
+});
+
 module.exports = router;

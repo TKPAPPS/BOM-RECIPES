@@ -366,6 +366,27 @@ export interface UserRow {
   updated_at: string;
 }
 
+/** Single item (read-only ingredient page). */
+export interface ItemDetail {
+  id: number;
+  name: string;
+  name_en: string | null;
+  name_he: string | null;
+  reference: string | null;
+  reference_code: string | null;
+  uom: string | null;
+  item_type: ItemType;
+  cost_per_kg?: number | null;   // stripped for users without price permission
+  raw_cost?: number | null;
+  volume_weight: number | null;
+  weight_source: string | null;
+  image_url: string | null;
+  is_active: boolean;
+  odoo_archived: boolean;
+  last_synced_at: string | null;
+  category_name: string | null;
+}
+
 /** The current user's own profile (GET/PATCH /users/me). */
 export interface MeProfile {
   id: number;

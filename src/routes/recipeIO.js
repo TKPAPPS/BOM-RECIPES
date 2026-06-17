@@ -262,32 +262,111 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
     details:  [],   // [{ row, name, status, message }]
   };
 
+  // Recipes with one or more unrecognised ingredients are NOT dropped:
+  // they are sent to the Pending Approval queue as a test recipe whose
+  // unmatched ingredients show red, so a manager can open it, pick the
+  // right products and approve it into the real list.  Upsert by name so
+  // re-importing the same file doesn't pile up duplicates.
+  async function sendToPendingApproval(draft, draftLines) {
+    const type = draft.recipe_type === 'final' ? 'final'
+      : (defaultType === 'final' ? 'final' : 'base');
+    const note = 'Imported from Excel — has unrecognized ingredients to fix before approval.';
+    const draftJson = {
+      yieldKg:            draft.yield_kg || 1,
+      recipe_type:        type,
+      full_name:          draft.full_name ?? null,
+      description:        draft.description ?? null,
+      image_url:          draft.image_url ?? null,
+      allergens:          Array.isArray(draft.allergens) ? draft.allergens : [],
+      is_spicy:           !!draft.is_spicy,
+      serving_suggestion: draft.serving_suggestion ?? null,
+      servings_count:     draft.servings_count ?? null,
+      total_weight:       draft.total_weight ?? null,
+      labor_cost: 0, overhead_cost: 0, packaging_cost: 0,
+      pricing_formula_id: null,
+      steps:              Array.isArray(draft.steps) ? draft.steps : [],
+      lines:              draftLines,
+    };
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const ex = await client.query(
+        `SELECT id FROM test_recipes WHERE LOWER(name) = LOWER($1) LIMIT 1`, [draft.name]
+      );
+      if (ex.rows.length) {
+        await client.query(
+          `UPDATE test_recipes SET reference_code=$1, recipe_type=$2, draft=$3,
+                  status='pending', review_note=$4, updated_at=NOW() WHERE id=$5`,
+          [draft.reference_code ?? null, type, draftJson, note, ex.rows[0].id]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO test_recipes (name, reference_code, recipe_type, draft, status, review_note, created_by)
+           VALUES ($1, $2, $3, $4, 'pending', $5, $6)`,
+          [draft.name, draft.reference_code ?? null, type, draftJson, note, userId]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
   // Process a single recipe end-to-end and return its report detail.
   // Pure w.r.t. shared state (no report mutation) so recipes can run
   // concurrently — each opens its own pooled connection + transaction.
   async function processOne(draft) {
     const detail = { row: draft.rowNumber, name: draft.name, status: 'failed', message: '' };
 
-    // ── Pre-flight: every ingredient must resolve ──
-    const unresolved = [];
-    const resolvedLines = [];
+    // ── Resolve every ingredient; build both the real lines (matched)
+    //    and the full draft-line list (matched + unmatched) for a
+    //    possible Pending Approval draft. ──
+    const unresolved = [];      // human-readable labels for the report
+    const resolvedLines = [];   // → real bom_lines
+    const draftLines = [];      // → test-recipe draft (keeps unmatched as red)
     for (const line of draft.lines) {
       const ing = lookupIngredient(ingMap, line);
-      if (!ing) {
-        unresolved.push(line.code || line.name || `(row ${line.rowNumber})`);
-        continue;
-      }
-      resolvedLines.push({
-        ingredient_item_id: ing.id,
-        quantity_kg:        line.quantity_kg,
-        line_uom:           line.line_uom || 'kg',
-        waste_pct:          line.waste_pct || 0,
+      draftLines.push({
+        item_id:     ing ? ing.id : null,
+        reference:   line.code || null,
+        name:        line.name || null,
+        quantity_kg: line.quantity_kg,
+        line_uom:    line.line_uom || 'kg',
+        waste_pct:   line.waste_pct || 0,
+        step_number: line.step_number ?? null,
       });
+      if (ing) {
+        resolvedLines.push({
+          ingredient_item_id: ing.id,
+          quantity_kg:        line.quantity_kg,
+          line_uom:           line.line_uom || 'kg',
+          waste_pct:          line.waste_pct || 0,
+        });
+      } else {
+        const label = line.name
+          ? `"${line.name}"${line.code ? ` (code ${line.code})` : ''}`
+          : (line.code ? `code ${line.code}` : `row ${line.rowNumber}`);
+        unresolved.push(label);
+      }
     }
+
+    // ── Some ingredients unrecognised → send to Pending Approval ──
     if (unresolved.length) {
-      detail.message = `Unknown ingredient code/name: ${unresolved.join(', ')}`;
+      try {
+        await sendToPendingApproval(draft, draftLines);
+        detail.status  = 'failed'; // stays "failed" in the report until fixed & approved
+        detail.message =
+          `Sent to Pending Approval — ${unresolved.length} unrecognized ingredient(s) not in the catalogue: `
+          + `${unresolved.join('; ')}. Open it under "Pending Approval", pick the right products and approve.`;
+      } catch (e) {
+        detail.message = `Could not queue for approval: ${e.message}`;
+      }
       return detail;
     }
+
     if (resolvedLines.length === 0) {
       detail.message = 'No ingredient rows for this recipe.';
       return detail;

@@ -2002,6 +2002,22 @@ label {
 .profile-err { color: var(--error); font-size: 12.5px; }
 .profile-logout { color: var(--error); border-color: var(--error); }
 
+/* ── Read-only ingredient page ─────────────────────────────── */
+.ingredient-view__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+.ingredient-view__field { display: flex; flex-direction: column; gap: 4px; }
+.ingredient-view__field span {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+.ingredient-view__field strong { font-size: 15px; color: var(--burgundy); }
+
 /* ── Role tab-permissions matrix ───────────────────────────── */
 .role-perms__hint { font-size: 13px; color: var(--text-secondary); margin: 0 0 16px; }
 .role-perms__table { border-collapse: collapse; width: 100%; max-width: 600px; font-size: 13px; }

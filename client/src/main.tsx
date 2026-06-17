@@ -24,6 +24,7 @@ import { TestRecipes } from './components/TestRecipes/TestRecipes';
 import { PendingApproval } from './components/TestRecipes/PendingApproval';
 import { TestRecipeView } from './components/TestRecipes/TestRecipeView';
 import { ProfilePage } from './components/Profile/ProfilePage';
+import { IngredientView } from './components/Products/IngredientView';
 import { TabRoute } from './components/TabRoute';
 import { LoginPage } from './pages/LoginPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -90,6 +91,8 @@ const router = createBrowserRouter(
         <Route path="settings"        element={<TabRoute tab="settings"><SettingsPage /></TabRoute>} />
         <Route path="logs"            element={<TabRoute tab="logs"><LogsPage /></TabRoute>} />
         <Route path="profile"         element={<TabRoute tab="profile"><ProfilePage /></TabRoute>} />
+        {/* Read-only ingredient page (opened from an ingredient name in a recipe) */}
+        <Route path="ingredient/:id"  element={<IngredientView />} />
       </Route>
     </>
   )

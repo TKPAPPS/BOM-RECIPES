@@ -26,8 +26,8 @@ export const TABS: TabDef[] = [
   { key: 'products',  path: '/products',        labelKey: 'products' },
   { key: 'settings',  path: '/settings',        labelKey: 'settings' },
   { key: 'logs',      path: '/logs',            labelKey: 'logs' },
-  // Personal area — always available to every user, not configurable.
-  { key: 'profile',   path: '/profile',         labelKey: 'profileTab', alwaysOn: true },
+  // Personal area — configurable per role (on by default for everyone).
+  { key: 'profile',   path: '/profile',         labelKey: 'profileTab' },
 ];
 
 /** Tabs that every role always sees (not part of the permission matrix). */
@@ -38,8 +38,8 @@ export const ALL_TAB_KEYS: TabKey[] = TABS.map((t) => t.key);
 /** Historical default visibility per role (used while loading / as fallback). */
 export function defaultTabsFor(role: Role): TabKey[] {
   if (role === 'manager') return [...ALL_TAB_KEYS];
-  if (role === 'admin') return ['book', 'test', 'products'];
-  return ['book']; // customer
+  if (role === 'admin') return ['book', 'test', 'products', 'profile'];
+  return ['book', 'profile']; // customer
 }
 
 /** First permitted tab's path (sidebar order), or null if none. */

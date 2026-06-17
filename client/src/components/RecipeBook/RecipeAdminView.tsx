@@ -440,17 +440,13 @@ export const RecipeAdminView: React.FC = () => {
                                 </span>
                               )}
                               <div className="recipe-view__ing-text">
-                                {isRecipe ? (
-                                  <Link
-                                    to={`/recipes/view/${l.ingredient_id}`}
-                                    className="recipe-view__ing-name recipe-view__ing-name--link"
-                                    title={t.openBaseRecipe}
-                                  >
-                                    {l.ingredient}
-                                  </Link>
-                                ) : (
-                                  <span className="recipe-view__ing-name">{l.ingredient}</span>
-                                )}
+                                <Link
+                                  to={isRecipe ? `/recipes/view/${l.ingredient_id}` : `/ingredient/${l.ingredient_id}`}
+                                  className="recipe-view__ing-name recipe-view__ing-name--link"
+                                  title={isRecipe ? t.openBaseRecipe : t.openIngredient}
+                                >
+                                  {l.ingredient}
+                                </Link>
                                 {isRecipe && (
                                   <button
                                     type="button"

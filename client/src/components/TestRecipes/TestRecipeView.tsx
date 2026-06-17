@@ -104,9 +104,21 @@ export const TestRecipeView: React.FC = () => {
                       </span>
                     )}
                     <div className="recipe-view__ing-text">
-                      <span className="recipe-view__ing-name" style={l.is_red ? { color: '#b91c1c' } : undefined}>
-                        {lineName(l)}
-                      </span>
+                      {l.resolved_item ? (
+                        <Link
+                          to={l.resolved_item.item_type === 'recipe'
+                            ? `/recipes/view/${l.resolved_item.id}`
+                            : `/ingredient/${l.resolved_item.id}`}
+                          className="recipe-view__ing-name recipe-view__ing-name--link"
+                          title={l.resolved_item.item_type === 'recipe' ? t.openBaseRecipe : t.openIngredient}
+                        >
+                          {lineName(l)}
+                        </Link>
+                      ) : (
+                        <span className="recipe-view__ing-name" style={l.is_red ? { color: '#b91c1c' } : undefined}>
+                          {lineName(l)}
+                        </span>
+                      )}
                       {l.is_red && (
                         <span className="recipe-view__sub-pill" style={{ color: '#b91c1c', borderColor: '#f3c0c0' }}>
                           {t.testMissingTag}

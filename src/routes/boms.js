@@ -348,17 +348,45 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   const { rows } = await pool.query(`SELECT item_id FROM boms WHERE id = $1`, [bomId]);
   if (!rows.length) return res.status(404).json({ error: 'not found' });
   const itemId = rows[0].item_id;
+
+  // Blocked only by LIVE recipes (active & not archived) that use it.
+  // References from archived / soft-deleted recipes are stale → cleaned.
+  const { rows: parents } = await pool.query(
+    `SELECT DISTINCT COALESCE(i.name_en, i.name) AS name
+       FROM bom_lines l
+       JOIN boms  b ON b.id = l.bom_id
+       JOIN items i ON i.id = b.item_id
+      WHERE l.ingredient_item_id = $1
+        AND b.item_id <> $1
+        AND b.is_active = TRUE
+        AND b.archived  = FALSE
+        AND i.is_active = TRUE
+      ORDER BY name LIMIT 20`,
+    [itemId]
+  );
+  if (parents.length) {
+    const usedBy = parents.map((r) => r.name);
+    const list = usedBy.slice(0, 5).join(', ') + (usedBy.length > 5 ? `, +${usedBy.length - 5} more` : '');
+    return res.status(409).json({
+      error: 'in_use',
+      usedBy,
+      message: `This recipe is used as a sub-recipe in: ${list}. Remove it from those recipes first, or archive it instead.`,
+    });
+  }
+
+  const client = await pool.connect();
   try {
-    await pool.query(`DELETE FROM items WHERE id = $1 AND item_type = 'recipe'`, [itemId]);
+    await client.query('BEGIN');
+    await client.query(`DELETE FROM boms WHERE item_id = $1`, [itemId]);
+    await client.query(`DELETE FROM bom_lines WHERE ingredient_item_id = $1`, [itemId]); // stale refs from archived/inactive
+    await client.query(`DELETE FROM items WHERE id = $1 AND item_type = 'recipe'`, [itemId]);
+    await client.query('COMMIT');
     res.json({ message: 'Recipe permanently deleted' });
   } catch (err) {
-    if (err.code === '23503') { // foreign_key_violation — used as a sub-recipe
-      return res.status(409).json({
-        error: 'in_use',
-        message: 'This recipe is used as a sub-recipe in another recipe and cannot be deleted. Remove it from those recipes first, or archive it instead.',
-      });
-    }
+    await client.query('ROLLBACK').catch(() => {});
     throw err;
+  } finally {
+    client.release();
   }
 });
 
@@ -371,47 +399,68 @@ function parseItemIds(body) {
 }
 
 // POST /boms/bulk-delete — PERMANENTLY delete many recipes by item_id.
-// Fast path deletes all at once (FK NO ACTION defers to statement end, so
-// internal cross-references within the set resolve as their lines cascade).
-// If any recipe is still referenced by a recipe OUTSIDE the set the bulk
-// statement fails atomically — we then fall back to a retry-until-stable
-// per-item pass so everything deletable is removed and the rest reported.
+// A recipe can't be deleted while it's used as a sub-recipe by a recipe
+// we are NOT deleting (it would break that parent) — those are reported
+// as `blocked`.  Everything else is removed in a single fast transaction
+// (a few queries total, not one-per-recipe).
 router.post('/bulk-delete', requireAdmin, async (req, res) => {
   const ids = parseItemIds(req.body);
   if (!ids.length) return res.status(400).json({ error: 'itemIds[] must be a non-empty array' });
 
-  try {
-    const { rowCount } = await pool.query(
-      `DELETE FROM items WHERE id = ANY($1::int[]) AND item_type = 'recipe'`,
-      [ids]
+  // Fixed-point: drop any selected recipe still used as an ingredient by a
+  // LIVE recipe (active & not archived) outside the (shrinking) set —
+  // those are the only real blockers.  References from archived or
+  // soft-deleted recipes are stale and get cleaned up on delete below.
+  // One query per round (= chain depth), not O(n²).
+  const candidate = new Set(ids);
+  for (;;) {
+    if (!candidate.size) break;
+    const arr = [...candidate];
+    const { rows } = await pool.query(
+      `SELECT DISTINCT l.ingredient_item_id AS id
+         FROM   bom_lines l
+         JOIN   boms b   ON b.id = l.bom_id
+         JOIN   items pi ON pi.id = b.item_id
+        WHERE   l.ingredient_item_id = ANY($1::int[])
+          AND   b.item_id <> ALL($1::int[])
+          AND   b.is_active = TRUE
+          AND   b.archived  = FALSE
+          AND   pi.is_active = TRUE`,
+      [arr]
     );
-    return res.json({ message: 'Recipes deleted', count: rowCount, blocked: [] });
-  } catch (err) {
-    if (err.code !== '23503') throw err; // only fall back on FK violations
+    if (!rows.length) break;                 // nothing else blocked → stable
+    for (const r of rows) candidate.delete(r.id);
   }
 
-  // Fallback: delete what we can, retrying until no further progress.
-  let remaining = [...ids];
+  const deletable = [...candidate];
+  const blocked   = ids.filter((id) => !candidate.has(id));
+
   let deleted = 0;
-  let progress = true;
-  while (progress && remaining.length) {
-    progress = false;
-    const stillBlocked = [];
-    for (const id of remaining) {
-      try {
-        const { rowCount } = await pool.query(
-          `DELETE FROM items WHERE id = $1 AND item_type = 'recipe'`, [id]
-        );
-        deleted += rowCount;
-        if (rowCount > 0) progress = true;
-      } catch (err) {
-        if (err.code === '23503') stillBlocked.push(id);
-        else throw err;
-      }
+  if (deletable.length) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // 1) Delete the recipes' own BOMs (cascades their bom_lines).
+      await client.query(`DELETE FROM boms WHERE item_id = ANY($1::int[])`, [deletable]);
+      // 2) Clear any remaining references to these items — they can only
+      //    come from archived/soft-deleted recipes now (live ones were
+      //    excluded above), so removing them is safe.
+      await client.query(`DELETE FROM bom_lines WHERE ingredient_item_id = ANY($1::int[])`, [deletable]);
+      // 3) Delete the items themselves.
+      const del = await client.query(
+        `DELETE FROM items WHERE id = ANY($1::int[]) AND item_type = 'recipe'`,
+        [deletable]
+      );
+      deleted = del.rowCount;
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
     }
-    remaining = stillBlocked;
   }
-  res.json({ message: 'Recipes deleted', count: deleted, blocked: remaining });
+  res.json({ message: 'Recipes deleted', count: deleted, blocked });
 });
 
 // POST /boms/bulk-archive — set archived flag for many recipes.
