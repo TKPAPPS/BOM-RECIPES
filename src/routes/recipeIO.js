@@ -166,7 +166,19 @@ async function findExistingRecipe(client, name, referenceCode) {
 
 // ── GET /template ───────────────────────────────────────────────────
 router.get('/template', requireAdmin, async (_req, res) => {
-  const buf = await buildTemplateWorkbook();
+  // Real pricing-formula names → template gets a dropdown + a worked example.
+  let formulaNames = [];
+  try {
+    const { rows } = await pool.query(
+      `SELECT MAX(name) AS name FROM pricing_formulas
+        WHERE formula_uid IS NOT NULL AND name IS NOT NULL
+        GROUP BY formula_uid ORDER BY MAX(name)`
+    );
+    formulaNames = rows.map((r) => r.name).filter(Boolean);
+  } catch (e) {
+    console.warn('[recipeIO/template] formula names skipped:', e.message);
+  }
+  const buf = await buildTemplateWorkbook(formulaNames);
   res.setHeader('Content-Type', XLSX_CONTENT_TYPE);
   res.setHeader(
     'Content-Disposition',
@@ -255,6 +267,22 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
 
   const userId = req.localUser?.id ?? null;
 
+  // Map pricing-formula NAME (lowercased) → pricing_formula_id. The id stored
+  // on boms.pricing_formula_id is the MIN(id) of the formula_uid group, which
+  // matches the convention used everywhere else (see GET /api/pricing).
+  const formulaByName = new Map();
+  try {
+    const { rows: fr } = await pool.query(
+      `SELECT MIN(id)::int AS pid, MAX(name) AS name
+         FROM pricing_formulas
+        WHERE formula_uid IS NOT NULL AND name IS NOT NULL
+        GROUP BY formula_uid`
+    );
+    for (const f of fr) if (f.name) formulaByName.set(f.name.trim().toLowerCase(), f.pid);
+  } catch (e) {
+    console.warn('[recipeIO/import] pricing-formula map skipped:', e.message);
+  }
+
   // Build a fresh ingredient map for a set of recipes against the CURRENT
   // DB state.  Re-run each round so recipes can resolve sub-recipe
   // siblings created earlier in the same import.
@@ -298,7 +326,11 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
       servings_count:     draft.servings_count ?? null,
       total_weight:       draft.total_weight ?? null,
       labor_cost: 0, overhead_cost: 0, packaging_cost: 0,
-      pricing_formula_id: null,
+      // Preserve the chosen pricing formula (final only) so it still applies
+      // when a manager later promotes this from Pending Approval.
+      pricing_formula_id: (type === 'final' && (draft.pricing_formula || '').trim())
+        ? (formulaByName.get(draft.pricing_formula.trim().toLowerCase()) ?? null)
+        : null,
       steps:              Array.isArray(draft.steps) ? draft.steps : [],
       lines:              draftLines,
     };
@@ -394,6 +426,17 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
       warnings.push(`Merged ${dedupCount} duplicate ingredient line${dedupCount === 1 ? '' : 's'} (same ingredient appeared twice — quantities summed).`);
     }
 
+    // Pricing formula (FINAL products only): pin by name if supplied.
+    const rtype = draft.recipe_type || defaultType;
+    let pricingFormulaId = null;
+    const wantFormula = (draft.pricing_formula || '').trim();
+    if (rtype === 'final' && wantFormula) {
+      pricingFormulaId = formulaByName.get(wantFormula.toLowerCase()) ?? null;
+      if (pricingFormulaId == null) {
+        warnings.push(`Pricing formula "${wantFormula}" was not found — the default formula will be used. Check the name in Settings → Pricing formulas.`);
+      }
+    }
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -423,7 +466,7 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
         labor_cost:         0,
         overhead_cost:      0,
         packaging_cost:     0,
-        pricing_formula_id: null,
+        pricing_formula_id: pricingFormulaId,
         lines:              mergedLines,
       };
 

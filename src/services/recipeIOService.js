@@ -44,6 +44,8 @@ const COLUMNS = [
     note: 'Required. Unique SKU / code for the recipe (e.g. CKC-0018). Used to match an existing recipe on re-import.' },
   { key: 'recipe_type',        header: 'Recipe Type',           width: 14, group: 'recipe', required: true,
     note: 'Required. "base" = work-in-progress sub-recipe (Base Recipes list). "final" = sellable product (Final Products list).' },
+  { key: 'pricing_formula',    header: 'Pricing Formula',       width: 20, group: 'recipe',
+    note: 'FINAL products only. Name of the pricing formula used to price this product (e.g. "Kitchen", "Bakery"). Must match a formula in Settings → Pricing formulas. Leave blank to use the default formula. Ignored for base recipes.' },
   { key: 'yield_kg',           header: 'Yield (kg)',            width: 10, group: 'recipe',
     note: 'Optional. Total batch weight the ingredient quantities refer to. Defaults to 1.' },
   { key: 'full_name',          header: 'Full Name',             width: 24, group: 'recipe',
@@ -113,6 +115,12 @@ const HEADER_ALIASES = {
   // recipe type
   recipetype: 'recipe_type', type: 'recipe_type',
   סוג: 'recipe_type', סוגמתכון: 'recipe_type',
+  // pricing formula (final products only)
+  pricingformula: 'pricing_formula', formula: 'pricing_formula',
+  formulaname: 'pricing_formula', priceformula: 'pricing_formula',
+  pricingformulaname: 'pricing_formula',
+  פורמולה: 'pricing_formula', שםפורמולה: 'pricing_formula',
+  נוסחה: 'pricing_formula', נוסחתתמחור: 'pricing_formula', נוסחתמחיר: 'pricing_formula',
   // yield
   yieldkg: 'yield_kg', yield: 'yield_kg',
   תפוקה: 'yield_kg', תפוקהקג: 'yield_kg',
@@ -381,6 +389,7 @@ async function parseRecipeWorkbook(buffer) {
         name:               nameVal,
         reference_code:     cellText(read(row, 'reference_code')) || null,
         recipe_type:        /final|סופי/i.test(cellText(read(row, 'recipe_type'))) ? 'final' : 'base',
+        pricing_formula:    cellText(read(row, 'pricing_formula')) || null,
         yield_kg:           parseNum(read(row, 'yield_kg')) || 1,
         full_name:          cellText(read(row, 'full_name')) || null,
         description:        cellText(read(row, 'description')) || null,
@@ -463,7 +472,7 @@ function styleHeaderRow(ws, headers, { markRequired = false } = {}) {
 // values must come from a fixed set (Recipe Type, Spicy).  Applied to
 // a wide range so the user can paste 100s of recipes underneath the
 // example without losing the dropdown arrow.
-function applyTemplateValidations(ws, headers) {
+function applyTemplateValidations(ws, headers, formulaNames = []) {
   const colIndex = (key) => headers.findIndex((h) => h.key === key) + 1;
   const colLetter = (n) => {
     let s = '';
@@ -475,6 +484,15 @@ function applyTemplateValidations(ws, headers) {
     { key: 'recipe_type', list: '"base,final"',  prompt: 'Pick "base" for sub-recipes / "final" for sellable products.' },
     { key: 'is_spicy',    list: '"Yes,No"',      prompt: 'Yes or No.' },
   ];
+  // Dropdown of the real pricing-formula names (final products only). Excel
+  // inline lists are capped ~255 chars, so only add it when it fits.
+  const fList = formulaNames.filter(Boolean).map((n) => String(n).replace(/[",]/g, ' ').trim());
+  if (fList.length) {
+    const joined = fList.join(',');
+    if (joined.length <= 250) {
+      VALIDATIONS.push({ key: 'pricing_formula', list: `"${joined}"`, prompt: 'Final products: name of the pricing formula. Leave blank for the default.' });
+    }
+  }
 
   for (const { key, list, prompt } of VALIDATIONS) {
     const c = colIndex(key);
@@ -519,6 +537,7 @@ function recipeRowValues(headers, recipe, line, isFirstLine) {
       case 'name':               return recipe.name ?? '';
       case 'reference_code':     return recipe.reference_code ?? '';
       case 'recipe_type':        return recipe.recipe_type ?? 'base';
+      case 'pricing_formula':    return recipe.recipe_type === 'final' ? (recipe.pricing_formula ?? recipe.formula_name ?? '') : '';
       case 'yield_kg':           return recipe.yield_kg ?? null;
       case 'full_name':          return recipe.full_name ?? '';
       case 'description':        return recipe.description ?? '';
@@ -574,7 +593,7 @@ function writeRecipeRows(ws, headers, recipes) {
  * as a reference.  Recipes is the active tab on open.
  * @returns {Promise<Buffer>}
  */
-async function buildTemplateWorkbook() {
+async function buildTemplateWorkbook(formulaNames = []) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'The Kosher Place — BOM System';
   wb.created = new Date();
@@ -600,6 +619,7 @@ async function buildTemplateWorkbook() {
       name: 'Hamin Chicken Catering Tray',
       reference_code: 'CKC-0018',
       recipe_type: 'final',
+      pricing_formula: formulaNames[0] || '',
       yield_kg: 1,
       full_name: 'Hamin Chicken Catering Tray',
       description: 'Slow-cooked Shabbat hamin with chicken, beans and potatoes.',
@@ -650,7 +670,7 @@ async function buildTemplateWorkbook() {
   ];
 
   writeRecipeRows(ws, headers, examples);
-  applyTemplateValidations(ws, headers);
+  applyTemplateValidations(ws, headers, formulaNames);
 
   // ── Instructions sheet (reference, added second) ──
   const info = wb.addWorksheet('Instructions', {
@@ -669,6 +689,7 @@ async function buildTemplateWorkbook() {
     ['One row per ingredient', 'List every ingredient of a recipe on its own row.'],
     ['Recipe header fields', 'Fill Recipe Name, Code, Type, etc. ONLY on the first ingredient row of each recipe. Leave them blank on the following rows.'],
     ['Recipe Type', 'Use the dropdown in the Recipe Type column: "base" → goes to the Base Recipes list. "final" → goes to the Final Products list.'],
+    ['Pricing Formula', 'FINAL products only. Type (or pick from the dropdown) the name of the pricing formula used to price the product, e.g. "Kitchen" or "Bakery". The name must match a formula in Settings → Pricing formulas. Leave blank to use the default formula. Ignored for base recipes.'],
     ['Ingredient Code', 'Must match an existing item reference code in the system (e.g. FRZ-0035). This is how ingredients are linked.'],
     ['Qty for 1 kg', 'Quantity of the ingredient needed per 1 kg of recipe yield (numbers only).'],
     ['Yield (kg)', 'Total batch output the quantities refer to. Defaults to 1.'],
