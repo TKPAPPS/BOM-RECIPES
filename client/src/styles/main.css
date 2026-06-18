@@ -3949,11 +3949,12 @@ a.sidebar-nav__item {
 }
 
 /* Search box reuses the Kitchen-Recipes toolbar search look
-   (.rio-toolbar__search); this just controls its width in the filter row. */
+   (.rio-toolbar__search). It takes a full row of its own, with the
+   allergen / spicy filters wrapping onto the line below. */
 .recipe-book__searchbox {
-  flex: 1 1 280px;
-  max-width: 520px;
-  min-width: 220px;
+  flex: 1 1 100%;
+  max-width: none;
+  min-width: 0;
 }
 
 .recipe-book__filter {
