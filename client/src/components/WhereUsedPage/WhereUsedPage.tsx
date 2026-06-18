@@ -67,10 +67,16 @@ const ItemSearchCombobox: React.FC<ComboboxProps> = ({ onSelect, placeholder }) 
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Close on scroll
+  // Close when the PAGE scrolls (the dropdown is position:fixed and would
+  // detach from the input). But ignore scrolling INSIDE the dropdown itself,
+  // otherwise scrolling its list would close it.
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
+    const close = (e: Event) => {
+      const target = e.target as Node | null;
+      if (target && dropdownRef.current?.contains(target)) return;
+      setOpen(false);
+    };
     window.addEventListener('scroll', close, { capture: true, passive: true });
     return () => window.removeEventListener('scroll', close, true);
   }, [open]);

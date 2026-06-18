@@ -122,9 +122,9 @@ export const UserManagementPanel: React.FC = () => {
             value={form.role}
             onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as 'admin' | 'customer' | 'manager' }))}
           >
-            <option value="customer">customer</option>
-            <option value="admin">admin</option>
-            <option value="manager">manager</option>
+            <option value="customer">{t.role_customer}</option>
+            <option value="admin">{t.role_admin}</option>
+            <option value="manager">{t.role_manager}</option>
           </select>
           <button className="btn btn--primary" disabled={creating} onClick={submitCreate}>
             {creating ? t.userSavePending : t.userCreateBtn}
@@ -173,9 +173,9 @@ export const UserManagementPanel: React.FC = () => {
                         })
                       }
                     >
-                      <option value="admin">admin</option>
-                      <option value="manager">manager</option>
-                      <option value="customer">customer</option>
+                      <option value="admin">{t.role_admin}</option>
+                      <option value="manager">{t.role_manager}</option>
+                      <option value="customer">{t.role_customer}</option>
                     </select>
                   </td>
                   <td>
