@@ -71,27 +71,41 @@ export const UserManagementPanel: React.FC = () => {
     createUser();
   };
 
-  // ── Edit-user modal (display name / username / reset password) ───
+  // ── Edit-user modal — full editor (name / username / role /
+  //    price visibility / password reset) ──────────────────────────
   const [editing, setEditing] = useState<UserRow | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', username: '', password: '' });
+  const [editForm, setEditForm] = useState<{
+    name: string; username: string; password: string;
+    role: 'admin' | 'customer' | 'manager'; cvp: string;
+  }>({ name: '', username: '', password: '', role: 'customer', cvp: 'default' });
   const openEdit = (u: UserRow) => {
     setEditing(u);
-    setEditForm({ name: u.name ?? '', username: u.username, password: '' });
+    setEditForm({ name: u.name ?? '', username: u.username, password: '', role: u.role, cvp: cvpValue(u) });
   };
   const submitEdit = () => {
     if (!editing) return;
-    const patch: { name?: string; username?: string; password?: string } = {};
+    const patch: {
+      name?: string; username?: string; password?: string;
+      role?: 'admin' | 'customer' | 'manager'; can_view_prices?: boolean | null;
+    } = {};
     if (editForm.name.trim() !== (editing.name ?? '')) patch.name = editForm.name.trim();
     if (editForm.username.trim() && editForm.username.trim() !== editing.username) patch.username = editForm.username.trim();
+    if (editForm.role !== editing.role) patch.role = editForm.role;
+    const cvp = parseCvp(editForm.cvp);
+    if (cvp !== editing.can_view_prices) patch.can_view_prices = cvp;
     if (editForm.password) {
       if (editForm.password.length < 6) { toast('Update failed', { type: 'warning', message: t.userPwHint }); return; }
       patch.password = editForm.password;
     }
-    if (Object.keys(patch).length) {
-      saveUser({ id: editing.id, patch });
-      toast(t.userEditSave, { type: 'success', message: editForm.username.trim() || editing.username });
-    }
-    setEditing(null);
+    if (!Object.keys(patch).length) { setEditing(null); return; }
+    // Keep the modal OPEN on failure (e.g. duplicate username → 409) so the
+    // user can correct it; close + confirm only on success.
+    saveUser({ id: editing.id, patch }, {
+      onSuccess: () => {
+        toast(t.userEditSave, { type: 'success', message: editForm.username.trim() || editing.username });
+        setEditing(null);
+      },
+    });
   };
 
   const fmtDate = (iso: string | null) =>
@@ -186,36 +200,12 @@ export const UserManagementPanel: React.FC = () => {
                     </div>
                   </td>
                   <td>
-                    <select
-                      value={u.role}
-                      disabled={rowPending}
-                      onChange={(e) =>
-                        saveUser({
-                          id: u.id,
-                          patch: { role: e.target.value as 'admin' | 'customer' | 'manager' },
-                        })
-                      }
-                    >
-                      <option value="admin">{t.role_admin}</option>
-                      <option value="manager">{t.role_manager}</option>
-                      <option value="customer">{t.role_customer}</option>
-                    </select>
+                    {(t as Record<string, string>)[`role_${u.role}`] || u.role}
                   </td>
                   <td>
-                    <select
-                      value={cvpValue(u)}
-                      disabled={rowPending}
-                      onChange={(e) =>
-                        saveUser({
-                          id: u.id,
-                          patch: { can_view_prices: parseCvp(e.target.value) },
-                        })
-                      }
-                    >
-                      <option value="default">{t.userCvpDefault}</option>
-                      <option value="true">{t.userCvpYes}</option>
-                      <option value="false">{t.userCvpNo}</option>
-                    </select>
+                    {u.can_view_prices === true ? t.userCvpYes
+                      : u.can_view_prices === false ? t.userCvpNo
+                      : t.userCvpDefault}
                   </td>
                   <td>
                     {u.is_active ? '✓' : '—'}
@@ -274,6 +264,30 @@ export const UserManagementPanel: React.FC = () => {
                 onChange={(e) => setEditForm((f) => ({ ...f, username: e.target.value }))}
                 autoComplete="off"
               />
+            </label>
+            <label className="user-edit__field">
+              <span>{t.userColRole}</span>
+              <select
+                className="ingredient-row__input"
+                value={editForm.role}
+                onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value as 'admin' | 'customer' | 'manager' }))}
+              >
+                <option value="admin">{t.role_admin}</option>
+                <option value="manager">{t.role_manager}</option>
+                <option value="customer">{t.role_customer}</option>
+              </select>
+            </label>
+            <label className="user-edit__field">
+              <span>{t.userColCanViewPrices}</span>
+              <select
+                className="ingredient-row__input"
+                value={editForm.cvp}
+                onChange={(e) => setEditForm((f) => ({ ...f, cvp: e.target.value }))}
+              >
+                <option value="default">{t.userCvpDefault}</option>
+                <option value="true">{t.userCvpYes}</option>
+                <option value="false">{t.userCvpNo}</option>
+              </select>
             </label>
             <label className="user-edit__field">
               <span>{t.userEditPw}</span>
