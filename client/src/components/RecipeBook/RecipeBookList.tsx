@@ -86,13 +86,19 @@ export const RecipeBookList: React.FC = () => {
 
       {/* ── Filters bar ──────────────────────────────────────── */}
       <div className="recipe-book__filters">
-        <input
-          type="search"
-          className="recipe-book__search"
-          placeholder={t.rbSearchPlaceholder}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <div className="rio-toolbar__search recipe-book__searchbox">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="search"
+            placeholder={t.rbSearchPlaceholder}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label={t.rbSearchPlaceholder}
+          />
+        </div>
 
         <label className="recipe-book__filter">
           <span className="recipe-book__filter-label">{t.rbFilterAllergen}</span>

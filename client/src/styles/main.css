@@ -3948,23 +3948,12 @@ a.sidebar-nav__item {
   margin-bottom: 16px;
 }
 
-.recipe-book__search {
+/* Search box reuses the Kitchen-Recipes toolbar search look
+   (.rio-toolbar__search); this just controls its width in the filter row. */
+.recipe-book__searchbox {
   flex: 1 1 280px;
   max-width: 520px;
   min-width: 220px;
-  height: 34px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0 12px;
-  font-size: 13px;
-  outline: none;
-  background: var(--bg-white);
-  transition: border-color var(--transition), box-shadow var(--transition);
-}
-
-.recipe-book__search:focus {
-  border-color: var(--gold);
-  box-shadow: 0 0 0 3px rgba(203,170,106,.15);
 }
 
 .recipe-book__filter {
@@ -7235,5 +7224,7 @@ a.sidebar-nav__item {
 
   /* Card grids fit small screens; comfortable tap targets */
   .kr-cards { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  /* Recipe Book: two cards per row on phones (like Kitchen Recipes) */
+  .recipe-book__grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
   .sidebar-nav__item { height: 48px; }
 }
