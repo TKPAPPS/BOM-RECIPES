@@ -140,6 +140,7 @@ export const FormulaManager: React.FC = () => {
       {isLoading ? (
         <div className="skeleton-table">{[1, 2, 3].map((n) => <div key={n} className="skeleton-row" />)}</div>
       ) : (
+        <div className="formula-manager__table-wrap">
         <table className="formula-manager__table">
           <thead>
             <tr>
@@ -180,6 +181,7 @@ export const FormulaManager: React.FC = () => {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {!formOpen && (

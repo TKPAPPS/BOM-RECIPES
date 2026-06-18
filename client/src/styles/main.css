@@ -1830,10 +1830,16 @@ label {
 }
 
 /* ── Formula Manager ─────────────────────────────────────── */
+/* Keep the (wide) formula table inside its card — scroll horizontally. */
+.formula-manager__table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 24px;
+}
 .formula-manager__table {
   width: 100%;
   border-collapse: collapse;
-  margin-bottom: 24px;
   font-size: 13px;
 }
 
@@ -7168,8 +7174,7 @@ a.sidebar-nav__item {
   /* Wide tables scroll horizontally instead of squishing */
   .bom-history__table,
   .user-mgmt__table,
-  .affected-recipes__table,
-  .formula-manager__table {
+  .affected-recipes__table {
     display: block;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
