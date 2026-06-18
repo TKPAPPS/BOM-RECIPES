@@ -5,6 +5,7 @@ import { api, triggerBlobDownload } from '../../api';
 import { useLang } from '../../context/LanguageContext';
 import type { TestRecipeSummary } from '../../types';
 import { useToastStore } from '../../stores/useToastStore';
+import { RecipeImportModal } from '../RecipeIO/RecipeImportModal';
 
 type SortKey = 'name' | 'reference_code' | 'type' | 'red';
 
@@ -27,6 +28,8 @@ export const PendingApproval: React.FC = () => {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const { data: recipes = [], isLoading } = useQuery({
     queryKey: ['test-recipes', 'pending'],
@@ -134,6 +137,20 @@ export const PendingApproval: React.FC = () => {
     navigate(`/test-recipes/print?ids=${ids().join(',')}`);
   };
 
+  // Toolbar export: exports every recipe currently shown (after filter +
+  // search), or all pending when nothing is filtered.
+  const exportAll = async () => {
+    const list = filtered.length ? filtered : recipes;
+    if (!list.length) return;
+    setExporting(true);
+    try {
+      const blob = await api.exportTestRecipes(list.map((r) => r.id));
+      triggerBlobDownload(blob, `pending-recipes-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch (e) { toast(t.rioExportFailed, { type: 'error', message: (e as Error).message }); }
+    finally { setExporting(false); }
+  };
+  const closeImport = () => { setImportOpen(false); invalidate(); };
+
   const typeLabel = (r: TestRecipeSummary) => r.recipe_type === 'final' ? t.finalProductOption : t.baseRecipeOption;
 
   return (
@@ -146,16 +163,44 @@ export const PendingApproval: React.FC = () => {
       </div>
       <p className="bom-history__subtitle">{t.pendingApprovalHint}</p>
 
-      {/* Search by recipe name or reference code */}
-      <div className="kr-searchbar">
-        <input
-          type="search"
-          className="input kr-searchbar__input"
-          placeholder={t.rbSearchPlaceholder}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          aria-label={t.rbSearchPlaceholder}
-        />
+      {/* Toolbar — styled like Kitchen Recipes: search + Export + Import
+          (no "Build new recipe" here). */}
+      <div className="rio-toolbar">
+        <div className="rio-toolbar__filters">
+          <div className="rio-toolbar__search">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t.rioSearchPlaceholder}
+              aria-label={t.rioSearchPlaceholder}
+            />
+          </div>
+        </div>
+        <div className="rio-toolbar__actions">
+          <button className="btn btn--ghost rio-toolbar__btn" onClick={exportAll} disabled={exporting || recipes.length === 0} title={t.rioExportBtn}>
+            {exporting ? <span className="btn-spinner" aria-hidden="true" /> : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            )}
+            <span>{t.rioExportBtn}</span>
+          </button>
+          <button className="btn btn--primary rio-toolbar__btn" onClick={() => setImportOpen(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <span>{t.rioImportBtn}</span>
+          </button>
+        </div>
       </div>
 
       {/* Toolbar: status filter + bulk bar (when selected) + view toggle */}
@@ -257,6 +302,8 @@ export const PendingApproval: React.FC = () => {
           </tbody>
         </table>
       )}
+
+      <RecipeImportModal open={importOpen} onClose={closeImport} defaultType="base" />
     </div>
   );
 };
