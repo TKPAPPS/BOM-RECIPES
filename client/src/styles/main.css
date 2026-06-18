@@ -7169,7 +7169,9 @@ a.sidebar-nav__item {
   .bom-history { padding: 18px 16px; }
   .settings-page { padding: 16px; }
   .dashboard { padding: 18px 16px; }
-  .affected-recipes, .where-used { padding: 18px 16px; }
+  /* Where-Used card + Personal area need an outer gutter from the screen */
+  .affected-recipes { margin: 24px 16px; padding: 20px; }
+  .profile-page { padding: 8px 16px 32px; }
 
   /* Wide tables scroll horizontally instead of squishing */
   .bom-history__table,
@@ -7208,9 +7210,9 @@ a.sidebar-nav__item {
   /* Even tighter gutters */
   .bom-history { padding: 14px 10px; }
   .settings-page,
-  .dashboard,
-  .affected-recipes,
-  .where-used { padding: 12px 10px; }
+  .dashboard { padding: 12px 10px; }
+  .affected-recipes { margin: 14px 12px; padding: 16px 14px; }
+  .profile-page { padding: 8px 12px 32px; }
   .recipe-builder, .formula-manager { margin: 8px; padding: 12px; }
 
   /* Smaller page headings */
