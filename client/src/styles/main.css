@@ -2571,15 +2571,35 @@ label {
 
 /* ── Responsive ───────────────────────────────────────────── */
 @media (max-width: 900px) {
+  /* Sidebar becomes an off-canvas drawer, sliding from the inline-start. */
   .app__sidebar {
-    width: var(--sidebar-w-collapsed);
+    position: fixed;
+    top: var(--header-h);
+    bottom: 0;
+    left: 0;
+    width: 250px;
+    z-index: 60;
+    transform: translateX(-105%);
+    transition: transform var(--transition-sidebar);
+    box-shadow: 6px 0 28px rgba(0,0,0,.22);
+    overflow-y: auto;
   }
+  .app__sidebar.app__sidebar--collapsed { width: 250px; }   /* ignore desktop collapse */
+  .app__sidebar .sidebar-nav__label { opacity: 1; pointer-events: auto; }
+  .app__sidebar.app__sidebar--open { transform: translateX(0); }
 
-  .app__sidebar .sidebar-nav__label {
-    opacity: 0;
-    pointer-events: none;
+  [dir="rtl"] .app__sidebar { left: auto; right: 0; transform: translateX(105%); }
+  [dir="rtl"] .app__sidebar.app__sidebar--open { transform: translateX(0); }
+
+  .app__nav-overlay {
+    position: fixed;
+    inset: var(--header-h) 0 0 0;
+    background: rgba(20,8,16,.45);
+    z-index: 55;
+    animation: navFade .15s ease;
   }
 }
+@keyframes navFade { from { opacity: 0; } to { opacity: 1; } }
 
 @media (max-width: 768px) {
   .recipe-builder,
@@ -7133,4 +7153,87 @@ a.sidebar-nav__item {
 }
 @media (max-width: 640px) {
   .rio-report__summary { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ===========================================================
+   Responsive pass — tablet (<=900px) & phone (<=600px)
+   =========================================================== */
+@media (max-width: 900px) {
+  /* Tighter page gutters */
+  .bom-history { padding: 18px 16px; }
+  .settings-page { padding: 16px; }
+  .dashboard { padding: 18px 16px; }
+  .affected-recipes, .where-used { padding: 18px 16px; }
+
+  /* Wide tables scroll horizontally instead of squishing */
+  .bom-history__table,
+  .user-mgmt__table,
+  .affected-recipes__table,
+  .formula-manager__table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
+
+  /* Toolbar stacks: search on its own row, actions below */
+  .rio-toolbar { flex-direction: column; align-items: stretch; gap: 10px; }
+  .rio-toolbar__filters,
+  .rio-toolbar__search { width: 100%; }
+  .rio-toolbar__actions { width: 100%; justify-content: flex-end; }
+
+  /* Settings tabs scroll horizontally */
+  .settings-page__tabs {
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+  .settings-page__tab { flex: 0 0 auto; }
+
+  .app__header { gap: 10px; padding: 0 12px; }
+}
+
+@media (max-width: 600px) {
+  /* Header: keep menu + logo + language + avatar only */
+  .app__header-meta { display: none; }
+  .app__user-name { display: none; }
+  .app__header { gap: 8px; padding: 0 8px; }
+  .app__user-menu { margin-inline-start: auto; }
+
+  /* Even tighter gutters */
+  .bom-history { padding: 14px 10px; }
+  .settings-page,
+  .dashboard,
+  .affected-recipes,
+  .where-used { padding: 12px 10px; }
+  .recipe-builder, .formula-manager { margin: 8px; padding: 12px; }
+
+  /* Smaller page headings */
+  .bom-history__title,
+  .affected-recipes__title,
+  .dashboard__title { font-size: 20px; }
+
+  /* Toolbar buttons share the row evenly */
+  .rio-toolbar__actions .rio-toolbar__btn { flex: 1; justify-content: center; }
+
+  /* Bulk action bar wraps */
+  .kr-bulkbar__actions { width: 100%; flex-wrap: wrap; }
+  .kr-bulkbar__actions .btn { flex: 1 1 auto; }
+
+  /* Create-user row stacks */
+  .user-mgmt__create-row > .ingredient-row__input,
+  .user-mgmt__create-row > select.ingredient-row__input,
+  .user-mgmt__create-row > .btn { flex: 1 1 100%; }
+
+  /* Modals fill the screen width */
+  .user-edit__modal { width: 94vw; padding: 20px; }
+
+  /* Quantity calculator form stacks */
+  .rb-calculator__form { flex-direction: column; align-items: stretch; }
+  .rb-calculator__form .btn,
+  .rb-calculator__field { width: 100%; }
+
+  /* Card grids fit small screens; comfortable tap targets */
+  .kr-cards { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .sidebar-nav__item { height: 48px; }
 }

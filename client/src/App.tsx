@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BomDrillDownModal } from './components/BomDrillDown/BomDrillDownModal';
@@ -1078,6 +1078,19 @@ const AppInner: React.FC = () => {
   const { t }    = useLang();
   const { user, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+  // Mobile/tablet: the sidebar becomes an off-canvas drawer.
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+  // Same hamburger: on desktop it collapses the rail; on mobile it opens
+  // the drawer.
+  const toggleNav = () => (isMobile ? setMobileOpen((o) => !o) : setCollapsed((c) => !c));
 
   // Which sidebar tabs this role may see — manager-configurable
   // (Settings → Permissions), with historical defaults as fallback.
@@ -1200,10 +1213,10 @@ const AppInner: React.FC = () => {
       <header className="app__header">
         <button
           className="app__menu-toggle"
-          onClick={() => setCollapsed((c) => !c)}
+          onClick={toggleNav}
           aria-label="Toggle navigation"
         >
-          <span className="app__menu-toggle-icon">{collapsed ? '☰' : '✕'}</span>
+          <span className="app__menu-toggle-icon">{isMobile ? (mobileOpen ? '✕' : '☰') : (collapsed ? '☰' : '✕')}</span>
         </button>
 
         <KosherPlaceLogo />
@@ -1244,13 +1257,17 @@ const AppInner: React.FC = () => {
 
       {/* ── Body: sidebar + main ──────────────────────────── */}
       <div className="app__body">
-        <aside className={`app__sidebar ${collapsed ? 'app__sidebar--collapsed' : ''}`}>
+        {isMobile && mobileOpen && (
+          <div className="app__nav-overlay" onClick={() => setMobileOpen(false)} aria-hidden="true" />
+        )}
+        <aside className={`app__sidebar ${collapsed ? 'app__sidebar--collapsed' : ''}${mobileOpen ? ' app__sidebar--open' : ''}`}>
           <nav className="sidebar-nav" aria-label="Main navigation">
             {NAV_ITEMS.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
                 end={item.end}
+                onClick={() => setMobileOpen(false)}
                 className={({ isActive }) =>
                   `sidebar-nav__item${isActive ? ' sidebar-nav__item--active' : ''}`
                 }
