@@ -216,11 +216,25 @@ router.patch('/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   if (!id) return res.status(400).json({ error: 'invalid user id' });
 
-  const { role, can_view_prices, is_active } = req.body ?? {};
+  const { role, can_view_prices, is_active, name, username, password } = req.body ?? {};
 
   // ── Validate inputs explicitly (incl. the three-state field) ─────
   if (role !== undefined && !['admin', 'customer', 'manager'].includes(role)) {
     return res.status(400).json({ error: "role must be 'admin', 'manager' or 'customer'" });
+  }
+  if (username !== undefined && !String(username).trim()) {
+    return res.status(400).json({ error: 'username cannot be empty' });
+  }
+  if (password !== undefined && password !== '' && String(password).length < 6) {
+    return res.status(400).json({ error: 'password must be at least 6 characters' });
+  }
+  // Reject a username already taken by ANOTHER user.
+  if (username !== undefined && String(username).trim()) {
+    const clash = await pool.query(
+      'SELECT 1 FROM users WHERE LOWER(username) = LOWER($1) AND id <> $2',
+      [String(username).trim(), id]
+    );
+    if (clash.rowCount) return res.status(409).json({ error: 'A user with that username already exists.' });
   }
   if (
     can_view_prices !== undefined &&
@@ -286,6 +300,18 @@ router.patch('/:id', async (req, res) => {
       params.push(is_active);
       sets.push(`is_active = $${params.length}`);
     }
+    if (name !== undefined) {
+      params.push(String(name).trim() || before.username);
+      sets.push(`name = $${params.length}`);
+    }
+    if (username !== undefined && String(username).trim()) {
+      params.push(String(username).trim());
+      sets.push(`username = $${params.length}`);
+    }
+    if (password !== undefined && password !== '') {
+      params.push(hashPassword(String(password)));
+      sets.push(`password_hash = $${params.length}`);
+    }
 
     if (!sets.length) {
       await client.query('ROLLBACK');
@@ -304,7 +330,7 @@ router.patch('/:id', async (req, res) => {
     // Diff: only include fields that actually changed
     const diffBefore = {};
     const diffAfter  = {};
-    for (const key of ['role', 'can_view_prices', 'is_active']) {
+    for (const key of ['role', 'can_view_prices', 'is_active', 'name', 'username']) {
       if (before[key] !== after[key]) {
         diffBefore[key] = before[key];
         diffAfter[key]  = after[key];

@@ -71,6 +71,29 @@ export const UserManagementPanel: React.FC = () => {
     createUser();
   };
 
+  // ── Edit-user modal (display name / username / reset password) ───
+  const [editing, setEditing] = useState<UserRow | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', username: '', password: '' });
+  const openEdit = (u: UserRow) => {
+    setEditing(u);
+    setEditForm({ name: u.name ?? '', username: u.username, password: '' });
+  };
+  const submitEdit = () => {
+    if (!editing) return;
+    const patch: { name?: string; username?: string; password?: string } = {};
+    if (editForm.name.trim() !== (editing.name ?? '')) patch.name = editForm.name.trim();
+    if (editForm.username.trim() && editForm.username.trim() !== editing.username) patch.username = editForm.username.trim();
+    if (editForm.password) {
+      if (editForm.password.length < 6) { toast('Update failed', { type: 'warning', message: t.userPwHint }); return; }
+      patch.password = editForm.password;
+    }
+    if (Object.keys(patch).length) {
+      saveUser({ id: editing.id, patch });
+      toast(t.userEditSave, { type: 'success', message: editForm.username.trim() || editing.username });
+    }
+    setEditing(null);
+  };
+
   const fmtDate = (iso: string | null) =>
     iso
       ? new Date(iso).toLocaleString('en-ZA', {
@@ -201,23 +224,73 @@ export const UserManagementPanel: React.FC = () => {
                     {fmtDate(u.last_login)}
                   </td>
                   <td>
-                    <button
-                      className={`btn btn--sm ${u.is_active ? 'btn--ghost' : 'btn--primary'}`}
-                      disabled={rowPending}
-                      onClick={() =>
-                        saveUser({ id: u.id, patch: { is_active: !u.is_active } })
-                      }
-                    >
-                      {rowPending
-                        ? t.userSavePending
-                        : (u.is_active ? t.userDeactivate : t.userActivate)}
-                    </button>
+                    <div className="user-mgmt__row-actions">
+                      <button
+                        className="btn btn--sm btn--ghost"
+                        disabled={rowPending}
+                        onClick={() => openEdit(u)}
+                      >
+                        {t.edit}
+                      </button>
+                      <button
+                        className={`btn btn--sm ${u.is_active ? 'btn--ghost' : 'btn--primary'}`}
+                        disabled={rowPending}
+                        onClick={() =>
+                          saveUser({ id: u.id, patch: { is_active: !u.is_active } })
+                        }
+                      >
+                        {rowPending
+                          ? t.userSavePending
+                          : (u.is_active ? t.userDeactivate : t.userActivate)}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+      )}
+
+      {/* ── Edit-user modal ──────────────────────────────────────── */}
+      {editing && (
+        <div className="user-edit__overlay" onClick={() => setEditing(null)}>
+          <div className="user-edit__modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="user-edit__title">{t.userEditTitle}</h3>
+            <label className="user-edit__field">
+              <span>{t.userEditName}</span>
+              <input
+                className="ingredient-row__input"
+                value={editForm.name}
+                onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                autoComplete="off"
+              />
+            </label>
+            <label className="user-edit__field">
+              <span>{t.userEditUsername}</span>
+              <input
+                className="ingredient-row__input"
+                value={editForm.username}
+                onChange={(e) => setEditForm((f) => ({ ...f, username: e.target.value }))}
+                autoComplete="off"
+              />
+            </label>
+            <label className="user-edit__field">
+              <span>{t.userEditPw}</span>
+              <input
+                className="ingredient-row__input"
+                type="password"
+                value={editForm.password}
+                onChange={(e) => setEditForm((f) => ({ ...f, password: e.target.value }))}
+                autoComplete="new-password"
+              />
+            </label>
+            <div className="user-edit__actions">
+              <button className="btn btn--ghost" onClick={() => setEditing(null)}>{t.userEditCancel}</button>
+              <button className="btn btn--primary" onClick={submitEdit}>{t.userEditSave}</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

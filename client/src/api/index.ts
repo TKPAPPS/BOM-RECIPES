@@ -300,6 +300,9 @@ export const api = {
     role?: 'admin' | 'customer' | 'manager';
     can_view_prices?: boolean | null;
     is_active?: boolean;
+    name?: string;
+    username?: string;
+    password?: string;
   }) => patch<UserRow>(`/users/${id}`, patchBody),
 
   /** Create a local user that logs in with username + password. */

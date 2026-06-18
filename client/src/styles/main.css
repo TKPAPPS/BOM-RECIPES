@@ -5127,7 +5127,35 @@ a.sidebar-nav__item {
 
 .user-mgmt__last-login { font-variant-numeric: tabular-nums; }
 
-.user-mgmt__actions-col { width: 130px; }
+.user-mgmt__actions-col { width: 180px; }
+.user-mgmt__row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ── Edit-user modal ──────────────────────────────────── */
+.user-edit__overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(30, 12, 24, .45);
+  display: flex; align-items: center; justify-content: center;
+}
+.user-edit__modal {
+  background: var(--bg-white);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 26px 28px;
+  width: 400px; max-width: 92vw;
+}
+.user-edit__title {
+  font-size: 18px; font-weight: 700;
+  color: var(--burgundy); margin-bottom: 18px;
+}
+.user-edit__field { display: block; margin-bottom: 14px; }
+.user-edit__field > span {
+  display: block; font-size: 12px; font-weight: 600;
+  color: var(--text-secondary); margin-bottom: 5px;
+}
+.user-edit__field .ingredient-row__input { width: 100%; }
+.user-edit__actions {
+  display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px;
+}
 
 /* ── Odoo Sync panel ──────────────────────────────────── */
 
