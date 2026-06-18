@@ -74,12 +74,14 @@ export const UserManagementPanel: React.FC = () => {
   // ── Edit-user modal — full editor (name / username / role /
   //    price visibility / password reset) ──────────────────────────
   const [editing, setEditing] = useState<UserRow | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{
     name: string; username: string; password: string;
     role: 'admin' | 'customer' | 'manager'; cvp: string;
   }>({ name: '', username: '', password: '', role: 'customer', cvp: 'default' });
   const openEdit = (u: UserRow) => {
     setEditing(u);
+    setEditError(null);
     setEditForm({ name: u.name ?? '', username: u.username, password: '', role: u.role, cvp: cvpValue(u) });
   };
   const submitEdit = () => {
@@ -98,13 +100,16 @@ export const UserManagementPanel: React.FC = () => {
       patch.password = editForm.password;
     }
     if (!Object.keys(patch).length) { setEditing(null); return; }
-    // Keep the modal OPEN on failure (e.g. duplicate username → 409) so the
-    // user can correct it; close + confirm only on success.
+    setEditError(null);
+    // Keep the modal OPEN on failure (e.g. duplicate username → 409) and show
+    // the reason inline so the user can fix it; close only on success.
     saveUser({ id: editing.id, patch }, {
       onSuccess: () => {
         toast(t.userEditSave, { type: 'success', message: editForm.username.trim() || editing.username });
         setEditing(null);
       },
+      onError: (e: Error) =>
+        setEditError(/already exists|taken/i.test(e.message) ? t.userUsernameTaken : e.message),
     });
   };
 
@@ -261,7 +266,7 @@ export const UserManagementPanel: React.FC = () => {
               <input
                 className="ingredient-row__input"
                 value={editForm.username}
-                onChange={(e) => setEditForm((f) => ({ ...f, username: e.target.value }))}
+                onChange={(e) => { setEditForm((f) => ({ ...f, username: e.target.value })); setEditError(null); }}
                 autoComplete="off"
               />
             </label>
@@ -299,6 +304,7 @@ export const UserManagementPanel: React.FC = () => {
                 autoComplete="new-password"
               />
             </label>
+            {editError && <div className="user-edit__error">{editError}</div>}
             <div className="user-edit__actions">
               <button className="btn btn--ghost" onClick={() => setEditing(null)}>{t.userEditCancel}</button>
               <button className="btn btn--primary" onClick={submitEdit}>{t.userEditSave}</button>
