@@ -8,7 +8,8 @@
     },
     {
       "src": "api/index.js",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": { "maxDuration": 300 }
     }
   ],
   "routes": [
