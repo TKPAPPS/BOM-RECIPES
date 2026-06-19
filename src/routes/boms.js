@@ -146,6 +146,60 @@ router.get('/', async (req, res) => {
   res.json(enriched);
 });
 
+// PATCH /boms/:itemId/card — update ONLY the recipe-book card fields
+// (branding): display name, description, allergens, spicy, total weight,
+// servings, serving suggestion, image. Does NOT touch ingredients, yield,
+// cost or pricing.  Admin/manager only.
+router.patch('/:itemId/card', requireAdmin, async (req, res) => {
+  const itemId = parseInt(req.params.itemId, 10);
+  if (!Number.isInteger(itemId)) return res.status(400).json({ error: 'invalid item id' });
+  const b = req.body || {};
+
+  let allergens;
+  if ('allergens' in b) {
+    allergens = Array.isArray(b.allergens)
+      ? b.allergens.map((s) => String(s).trim()).filter(Boolean)
+      : String(b.allergens || '').split(',').map((s) => s.trim()).filter(Boolean);
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const sets = []; const params = [];
+    const add = (col, val) => { params.push(val); sets.push(`${col} = $${params.length}`); };
+    if ('full_name' in b)          add('full_name', (b.full_name ?? '').toString().trim() || null);
+    if ('description' in b)        add('description', (b.description ?? '').toString() || null);
+    if (allergens !== undefined)   add('allergens', allergens);
+    if ('is_spicy' in b)           add('is_spicy', !!b.is_spicy);
+    if ('serving_suggestion' in b) add('serving_suggestion', (b.serving_suggestion ?? '').toString() || null);
+    if ('servings_count' in b)     add('servings_count', (b.servings_count === '' || b.servings_count == null) ? null : parseInt(b.servings_count, 10));
+    if ('total_weight' in b)       add('total_weight', (b.total_weight === '' || b.total_weight == null) ? null : parseFloat(b.total_weight));
+
+    if (sets.length) {
+      params.push(itemId);
+      const r = await client.query(
+        `UPDATE boms SET ${sets.join(', ')}, updated_at = NOW() WHERE item_id = $${params.length} RETURNING id`,
+        params
+      );
+      if (!r.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'recipe not found' }); }
+    }
+    if ('image_url' in b) {
+      await client.query(`UPDATE items SET image_url = $1, updated_at = NOW() WHERE id = $2`, [b.image_url || null, itemId]);
+    }
+    await client.query('COMMIT');
+    await logAudit({
+      userId: req.localUser?.id ?? null, actionType: 'recipe_card_update',
+      entity: 'bom', entityId: itemId, description: 'Updated recipe-book card fields',
+      ipAddress: getIp(req),
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query('ROLLBACK'); throw err;
+  } finally {
+    client.release();
+  }
+});
+
 // GET /boms/:itemId — fetch BOM with lines for a recipe
 router.get('/:itemId', async (req, res) => {
   const { rows } = await pool.query(

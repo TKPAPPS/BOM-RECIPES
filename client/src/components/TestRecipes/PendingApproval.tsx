@@ -297,7 +297,7 @@ export const PendingApproval: React.FC = () => {
                   <td className="bom-history__num">
                     {hasRed ? <span className="test-red-badge" title={t.testRedTooltip}>{r.red_count}</span> : <span className="test-ok-badge">✓</span>}
                   </td>
-                  <td className="bom-history__num" style={{ whiteSpace: 'nowrap' }}>
+                  <td style={{ whiteSpace: 'nowrap', textAlign: 'end' }}>
                     <button className="btn btn--ghost btn--sm" onClick={() => navigate(`/test-recipe/${r.id}`)}>{t.edit}</button>
                     {isManager && <button className="btn btn--primary btn--sm" style={{ marginInlineStart: 6 }} disabled={hasRed || approve.isPending} title={hasRed ? t.promoteBlockedRed : t.approveRecipe} onClick={() => { if (window.confirm(t.approveConfirm.replace('{name}', r.name))) approve.mutate(r.id); }}>{t.approveRecipe}</button>}
                   </td>

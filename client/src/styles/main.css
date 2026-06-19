@@ -5190,6 +5190,12 @@ a.sidebar-nav__item {
 .user-edit__actions {
   display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;
 }
+/* Recipe-book card editor (reuses the user-edit modal shell) */
+.rb-card-edit { width: 540px; max-width: 94vw; }
+.rb-card-edit__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.user-edit__field--row { display: flex; align-items: center; gap: 8px; }
+.user-edit__field--row > span { display: inline; margin: 0; font-weight: 600; }
+.rb-card-edit textarea.ingredient-row__input { resize: vertical; min-height: 58px; padding: 8px 10px; line-height: 1.45; }
 
 /* ── Odoo Sync panel ──────────────────────────────────── */
 

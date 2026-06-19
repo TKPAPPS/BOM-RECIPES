@@ -595,20 +595,27 @@ export const RecipeBuilder: React.FC<{ mode?: 'real' | 'test' }> = ({ mode = 're
         <label className={`recipe-builder__field${fieldErrors.referenceCode ? ' recipe-builder__field--error' : ''}`}>
           <span>{t.referenceCode}</span>
           <div className="recipe-builder__refcode-row">
-            {refCategories.length > 0 && (
-              <select
-                className="recipe-builder__refcode-select"
-                value=""
-                onChange={(e) => { handlePickCategory(e.target.value); e.target.value = ''; }}
-              >
-                <option value="">{t.refCodeCategorySelect}</option>
-                {refCategories.map((c) => (
-                  <option key={c.id} value={c.prefix}>
-                    {c.prefix}{c.description ? ` — ${c.description}` : ''}
-                  </option>
-                ))}
-              </select>
-            )}
+            {/* Base recipes are always BAS; final products use any prefix
+                EXCEPT BAS. */}
+            {(() => {
+              const prefixOptions = recipeType === 'base'
+                ? refCategories.filter((c) => c.prefix.toUpperCase() === 'BAS')
+                : refCategories.filter((c) => c.prefix.toUpperCase() !== 'BAS');
+              return prefixOptions.length > 0 && (
+                <select
+                  className="recipe-builder__refcode-select"
+                  value=""
+                  onChange={(e) => { handlePickCategory(e.target.value); e.target.value = ''; }}
+                >
+                  <option value="">{t.refCodeCategorySelect}</option>
+                  {prefixOptions.map((c) => (
+                    <option key={c.id} value={c.prefix}>
+                      {c.prefix}{c.description ? ` — ${c.description}` : ''}
+                    </option>
+                  ))}
+                </select>
+              );
+            })()}
             <input
               className="recipe-builder__refcode-input"
               type="text"

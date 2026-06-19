@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api';
 import { useLang } from '../../context/LanguageContext';
+import { useAuth } from '../../context/AuthContext';
+import { useToastStore } from '../../stores/useToastStore';
 import { getImageSrc, fmtQty, fmtMoney, CURRENCY_SYMBOL } from './imageHelpers';
 import { RecipeCalculator } from './RecipeCalculator';
 import type { BomDetail, BomLine, CalcIngredient } from '../../types';
@@ -37,6 +39,48 @@ export const RecipeBookDetail: React.FC = () => {
     queryFn: () => api.getBom(id),
     enabled: Number.isFinite(id),
     retry: false,
+  });
+
+  // ── Edit recipe-book card (branding) — manager / admin only ──────
+  const qc = useQueryClient();
+  const toast = useToastStore((s) => s.push);
+  const { user } = useAuth();
+  const canEdit = !!user && (user.role === 'manager' || user.role === 'admin');
+  const [editOpen, setEditOpen] = useState(false);
+  const [card, setCard] = useState({
+    full_name: '', description: '', allergens: '', is_spicy: false,
+    total_weight: '', servings_count: '', serving_suggestion: '',
+  });
+  const openEdit = () => {
+    const d = recipe as BomDetail;
+    setCard({
+      full_name: d.full_name ?? '',
+      description: d.description ?? '',
+      allergens: (d.allergens ?? []).join(', '),
+      is_spicy: !!d.is_spicy,
+      total_weight: d.total_weight != null ? String(d.total_weight) : '',
+      servings_count: d.servings_count != null ? String(d.servings_count) : '',
+      serving_suggestion: d.serving_suggestion ?? '',
+    });
+    setEditOpen(true);
+  };
+  const saveCard = useMutation({
+    mutationFn: () => api.updateRecipeCard(id, {
+      full_name: card.full_name,
+      description: card.description,
+      allergens: card.allergens.split(',').map((s) => s.trim()).filter(Boolean),
+      is_spicy: card.is_spicy,
+      total_weight: card.total_weight === '' ? null : parseFloat(card.total_weight),
+      servings_count: card.servings_count === '' ? null : parseInt(card.servings_count, 10),
+      serving_suggestion: card.serving_suggestion,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['bom-detail', id] });
+      qc.invalidateQueries({ queryKey: ['boms'] });
+      toast(t.rbCardSaved, { type: 'success' });
+      setEditOpen(false);
+    },
+    onError: (e: Error) => toast(t.failedToLoad, { type: 'error', message: e.message }),
   });
 
   if (isLoading) return <div className="view-placeholder"><p>{t.loading}</p></div>;
@@ -136,6 +180,15 @@ export const RecipeBookDetail: React.FC = () => {
       <div className="rb-detail__back rb-detail__print-bar">
         <Link to="/book" className="rb-detail__back-link">{t.rbBackToList}</Link>
         <div className="rb-detail__print-actions">
+          {canEdit && (
+            <button type="button" className="recipe-view__action-btn" onClick={openEdit} title={t.rbEditCard}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+              <span>{t.rbEditCard}</span>
+            </button>
+          )}
           <button type="button" className="recipe-view__action-btn" onClick={handlePrintPage} title={t.rbViewPrintTitle}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <polyline points="6 9 6 2 18 2 18 9"/>
@@ -228,6 +281,59 @@ export const RecipeBookDetail: React.FC = () => {
 
       {/* ── Embedded calculator ───────────────────────────── */}
       <RecipeCalculator recipe={detail} />
+
+      {/* ── Edit recipe-book card modal ───────────────────── */}
+      {editOpen && (
+        <div className="user-edit__overlay" onClick={() => setEditOpen(false)}>
+          <div className="user-edit__modal rb-card-edit" onClick={(e) => e.stopPropagation()}>
+            <h3 className="user-edit__title">{t.rbEditCard}</h3>
+            <label className="user-edit__field">
+              <span>{t.rbFieldFullName}</span>
+              <input className="ingredient-row__input" value={card.full_name}
+                onChange={(e) => setCard((c) => ({ ...c, full_name: e.target.value }))} />
+            </label>
+            <label className="user-edit__field">
+              <span>{t.rbFieldDescription}</span>
+              <textarea className="ingredient-row__input" rows={3} value={card.description}
+                onChange={(e) => setCard((c) => ({ ...c, description: e.target.value }))} />
+            </label>
+            <label className="user-edit__field">
+              <span>{t.rbFieldAllergens}</span>
+              <input className="ingredient-row__input" value={card.allergens}
+                placeholder="e.g. gluten, dairy, nuts"
+                onChange={(e) => setCard((c) => ({ ...c, allergens: e.target.value }))} />
+            </label>
+            <label className="user-edit__field user-edit__field--row">
+              <input type="checkbox" checked={card.is_spicy}
+                onChange={(e) => setCard((c) => ({ ...c, is_spicy: e.target.checked }))} />
+              <span>🌶 {t.rbSpicyTag}</span>
+            </label>
+            <div className="rb-card-edit__grid">
+              <label className="user-edit__field">
+                <span>{t.rbTotalWeight} (kg)</span>
+                <input className="ingredient-row__input" type="number" step="0.0001" value={card.total_weight}
+                  onChange={(e) => setCard((c) => ({ ...c, total_weight: e.target.value }))} />
+              </label>
+              <label className="user-edit__field">
+                <span>{t.rbServings}</span>
+                <input className="ingredient-row__input" type="number" value={card.servings_count}
+                  onChange={(e) => setCard((c) => ({ ...c, servings_count: e.target.value }))} />
+              </label>
+            </div>
+            <label className="user-edit__field">
+              <span>{t.rbServingSuggestion}</span>
+              <textarea className="ingredient-row__input" rows={2} value={card.serving_suggestion}
+                onChange={(e) => setCard((c) => ({ ...c, serving_suggestion: e.target.value }))} />
+            </label>
+            <div className="user-edit__actions">
+              <button className="btn btn--ghost" onClick={() => setEditOpen(false)} disabled={saveCard.isPending}>{t.userEditCancel}</button>
+              <button className="btn btn--primary" onClick={() => saveCard.mutate()} disabled={saveCard.isPending}>
+                {saveCard.isPending ? t.userSavePending : t.userEditSave}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -76,6 +76,18 @@ export const api = {
   getBom: (itemId: number) =>
     get<BomDetail>(`/boms/${itemId}`),
 
+  /** Update ONLY the recipe-book card (branding) fields of a recipe. */
+  updateRecipeCard: (itemId: number, body: {
+    full_name?: string;
+    description?: string;
+    allergens?: string[];
+    is_spicy?: boolean;
+    serving_suggestion?: string;
+    servings_count?: number | null;
+    total_weight?: number | null;
+    image_url?: string | null;
+  }) => patch<{ ok: boolean }>(`/boms/${itemId}/card`, body),
+
   getBoms: (type?: RecipeType, opts?: { archived?: boolean }) => {
     const params = new URLSearchParams();
     if (type) params.set('type', type);
