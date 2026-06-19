@@ -38,7 +38,7 @@ export const ALL_TAB_KEYS: TabKey[] = TABS.map((t) => t.key);
 /** Historical default visibility per role (used while loading / as fallback). */
 export function defaultTabsFor(role: Role): TabKey[] {
   if (role === 'manager') return [...ALL_TAB_KEYS];
-  if (role === 'admin') return ['book', 'test', 'products', 'profile'];
+  if (role === 'admin') return ['book', 'test', 'products', 'whereused', 'pending', 'profile'];
   return ['book', 'profile']; // customer
 }
 

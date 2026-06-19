@@ -6,6 +6,7 @@ import { useLang } from '../../context/LanguageContext';
 import type { TestRecipeSummary } from '../../types';
 import { useToastStore } from '../../stores/useToastStore';
 import { RecipeImportModal } from '../RecipeIO/RecipeImportModal';
+import { useAuth } from '../../context/AuthContext';
 
 type SortKey = 'name' | 'reference_code' | 'type' | 'red';
 
@@ -20,6 +21,10 @@ export const PendingApproval: React.FC = () => {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const toast = useToastStore((s) => s.push);
+  // Only a MANAGER can finally approve (promote) a recipe. The kitchen team
+  // (admin) may view and edit pending recipes, but not approve them.
+  const { user } = useAuth();
+  const isManager = user?.role === 'manager';
 
   const [viewMode, setViewMode] = useState<'cards' | 'list'>('list');
   const [filter, setFilter] = useState<'all' | 'ready' | 'issues'>('all');
@@ -217,7 +222,7 @@ export const PendingApproval: React.FC = () => {
               <button className="btn btn--ghost btn--sm" onClick={bulkExport} disabled={busy}>⭳ {t.rioExportBtn}</button>
               <button className="btn btn--ghost btn--sm" onClick={bulkPrint} disabled={busy}>⎙ {t.rbViewPrint}</button>
               <button className="btn btn--ghost btn--sm" onClick={bulkPrint} disabled={busy}>📄 {t.pdf}</button>
-              <button className="btn btn--primary btn--sm" onClick={bulkApprove} disabled={busy}>{busy ? '…' : `✓ ${t.approveRecipe}`}</button>
+              {isManager && <button className="btn btn--primary btn--sm" onClick={bulkApprove} disabled={busy}>{busy ? '…' : `✓ ${t.approveRecipe}`}</button>}
               <button className="btn btn--ghost btn--sm kr-bulkbar__danger" onClick={bulkDelete} disabled={busy}>🗑 {t.delete}</button>
               <button className="btn btn--ghost btn--sm" onClick={clearSel} disabled={busy}>✕ {t.clear}</button>
             </div>
@@ -261,7 +266,7 @@ export const PendingApproval: React.FC = () => {
                   </div>
                   <div className="kr-card__actions">
                     <button className="btn btn--ghost btn--sm" onClick={() => navigate(`/test-recipe/${r.id}`)}>{t.edit}</button>
-                    <button className="btn btn--primary btn--sm" disabled={hasRed || approve.isPending} title={hasRed ? t.promoteBlockedRed : t.approveRecipe} onClick={() => { if (window.confirm(t.approveConfirm.replace('{name}', r.name))) approve.mutate(r.id); }}>{t.approveRecipe}</button>
+                    {isManager && <button className="btn btn--primary btn--sm" disabled={hasRed || approve.isPending} title={hasRed ? t.promoteBlockedRed : t.approveRecipe} onClick={() => { if (window.confirm(t.approveConfirm.replace('{name}', r.name))) approve.mutate(r.id); }}>{t.approveRecipe}</button>}
                   </div>
                 </div>
               </div>
@@ -294,7 +299,7 @@ export const PendingApproval: React.FC = () => {
                   </td>
                   <td className="bom-history__num" style={{ whiteSpace: 'nowrap' }}>
                     <button className="btn btn--ghost btn--sm" onClick={() => navigate(`/test-recipe/${r.id}`)}>{t.edit}</button>
-                    <button className="btn btn--primary btn--sm" style={{ marginInlineStart: 6 }} disabled={hasRed || approve.isPending} title={hasRed ? t.promoteBlockedRed : t.approveRecipe} onClick={() => { if (window.confirm(t.approveConfirm.replace('{name}', r.name))) approve.mutate(r.id); }}>{t.approveRecipe}</button>
+                    {isManager && <button className="btn btn--primary btn--sm" style={{ marginInlineStart: 6 }} disabled={hasRed || approve.isPending} title={hasRed ? t.promoteBlockedRed : t.approveRecipe} onClick={() => { if (window.confirm(t.approveConfirm.replace('{name}', r.name))) approve.mutate(r.id); }}>{t.approveRecipe}</button>}
                   </td>
                 </tr>
               );

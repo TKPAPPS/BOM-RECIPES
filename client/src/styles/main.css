@@ -3962,6 +3962,14 @@ a.sidebar-nav__item {
   max-width: none;
   min-width: 0;
 }
+.recipe-book__searchrow { margin-bottom: 12px; }
+.recipe-book__searchrow .recipe-book__searchbox { width: 100%; }
+/* Base/Final tab bar (reused Kitchen style) as a self-contained pill bar */
+.recipe-book .kr-tabs {
+  margin: 0 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
 
 .recipe-book__filter {
   display: inline-flex;

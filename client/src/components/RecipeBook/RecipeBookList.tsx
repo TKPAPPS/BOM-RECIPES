@@ -33,6 +33,20 @@ export const RecipeBookList: React.FC = () => {
     staleTime: 30_000,
   });
 
+  // Per-type counts for the Base / Final tab badges.
+  const { data: baseList } = useQuery({
+    queryKey: ['boms', 'base', false],
+    queryFn: () => api.getBoms('base', { archived: false }),
+    staleTime: 30_000,
+  });
+  const { data: finalList } = useQuery({
+    queryKey: ['boms', 'final', false],
+    queryFn: () => api.getBoms('final', { archived: false }),
+    staleTime: 30_000,
+  });
+  const baseCount  = baseList?.length;
+  const finalCount = finalList?.length;
+
   // Build filter option sets from the data we actually have.
   // (Category list could also come from /api/categories — but we
   // only want categories that actually have a recipe attached.)
@@ -63,29 +77,10 @@ export const RecipeBookList: React.FC = () => {
           <h2 className="recipe-book__title">{t.recipeBook}</h2>
           <p className="recipe-book__subtitle">{t.recipeBookSubtitle}</p>
         </div>
-
-        <div className="recipe-book__type-toggle" role="tablist">
-          <button
-            role="tab"
-            aria-selected={type === 'final'}
-            className={`recipe-book__type-btn ${type === 'final' ? 'recipe-book__type-btn--active' : ''}`}
-            onClick={() => setType('final')}
-          >
-            {t.finalProducts}
-          </button>
-          <button
-            role="tab"
-            aria-selected={type === 'base'}
-            className={`recipe-book__type-btn ${type === 'base' ? 'recipe-book__type-btn--active' : ''}`}
-            onClick={() => setType('base')}
-          >
-            {t.baseRecipes}
-          </button>
-        </div>
       </header>
 
-      {/* ── Filters bar ──────────────────────────────────────── */}
-      <div className="recipe-book__filters">
+      {/* ── Search (own full row) ────────────────────────────── */}
+      <div className="recipe-book__searchrow">
         <div className="rio-toolbar__search recipe-book__searchbox">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <circle cx="11" cy="11" r="8" />
@@ -99,7 +94,34 @@ export const RecipeBookList: React.FC = () => {
             aria-label={t.rbSearchPlaceholder}
           />
         </div>
+      </div>
 
+      {/* ── Base / Final tab bar with counts (Kitchen style) ─── */}
+      <div className="kr-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={type === 'base'}
+          className={`kr-tab${type === 'base' ? ' kr-tab--active' : ''}`}
+          onClick={() => setType('base')}
+        >
+          {t.baseRecipes}
+          {baseCount != null && <span className="kr-tab__count">{baseCount}</span>}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={type === 'final'}
+          className={`kr-tab${type === 'final' ? ' kr-tab--active' : ''}`}
+          onClick={() => setType('final')}
+        >
+          {t.finalProducts}
+          {finalCount != null && <span className="kr-tab__count">{finalCount}</span>}
+        </button>
+      </div>
+
+      {/* ── Filters bar (allergen / spicy) ───────────────────── */}
+      <div className="recipe-book__filters">
         <label className="recipe-book__filter">
           <span className="recipe-book__filter-label">{t.rbFilterAllergen}</span>
           <select
