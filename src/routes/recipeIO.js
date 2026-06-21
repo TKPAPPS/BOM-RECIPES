@@ -107,12 +107,17 @@ async function resolveIngredients(client, codes, names) {
 
   const byRef  = new Map();
   const byName = new Map();
+  // When a code / name matches BOTH a raw material and a recipe (e.g. a
+  // final lists "Cinnamon Danish" which exists as both an Odoo bulk item and
+  // a base recipe), prefer the RECIPE so the line can be drilled down and is
+  // costed from its own breakdown.
+  const prefer = (existing, r) =>
+    (existing && existing.item_type === 'recipe' && r.item_type !== 'recipe') ? existing : r;
+  const keep = (map, k, r) => map.set(k, prefer(map.get(k), r));
   for (const r of [...rows, ...recRows]) {
-    if (r.reference) byRef.set(r.reference.toUpperCase(), r);
-    const names = [r.name, r.name_en, r.name_he].filter(Boolean);
-    for (const n of names) {
-      const k = n.toUpperCase();
-      if (!byName.has(k)) byName.set(k, r);
+    if (r.reference) keep(byRef, r.reference.toUpperCase(), r);
+    for (const n of [r.name, r.name_en, r.name_he].filter(Boolean)) {
+      keep(byName, n.toUpperCase(), r);
     }
   }
   // Caller uses lookup(line) — collapse into one map keyed by `ref:CODE`
